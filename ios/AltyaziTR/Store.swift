@@ -107,5 +107,5 @@ enum Links {
     /// Tanıtım ve destek sayfası.
     static let site = URL(string: "https://marhilk.github.io/")!
     /// Uygulamanın kaynak kodu (AGPL gereği kullanıcıya sunulur). Depo, uygulama mağazaya çıkmadan önce herkese açılmalıdır.
-    static let source = URL(string: "https://github.com/marhilk/marlhilk")!
+    static let source = URL(string: "https://github.com/marhilk/marhilk")!
 }
