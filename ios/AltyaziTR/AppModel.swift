@@ -111,6 +111,72 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Konuşma seçeneklerini de çevir: ekranda alt alta beliren 2–6 kısa seçenek, listenin altında
+    /// numaralı Türkçe karşılıklarıyla gösterilir.
+    @Published var choicesEnabled: Bool = true {
+        didSet {
+            defaults.set(choicesEnabled, forKey: "choicesEnabled")
+            choiceFlag.value = choicesEnabled
+            if !choicesEnabled { Task { await choices.reset() } }
+        }
+    }
+    private let choiceFlag = Flag(true)
+    /// Seçeneklerin arandığı alan: üst şerit dışında ekranın neredeyse tamamı. Altyazı ve görev
+    /// çerçevelerinin içine düşen yazılar burada yok sayılır (onları kendi okuyucuları çevirir).
+    private static let choiceArea = CGRect(x: 0.04, y: 0.22, width: 0.92, height: 0.75)
+    private let choiceReader: FrameTextReader = {
+        let reader = FrameTextReader(interval: 0.5)
+        reader.setRegion(AppModel.choiceArea)
+        return reader
+    }()
+
+    /// Okuma süresi: oyun bir repliği çabuk kaldırdığında çevirinin ekranda bekleme süresinin çarpanı.
+    @Published var readingPace: Double = 1 {
+        didSet {
+            defaults.set(readingPace, forKey: "readingPace")
+            let pace = readingPace
+            Task { await pipeline.setReadingPace(pace) }
+        }
+    }
+
+    /// Seçili oyunda çevrilmeyecek adlar (karakter, yer, silah).
+    @Published private(set) var keptTerms: [String] = []
+    private var protector = TermProtector(terms: [])
+    /// Bu oturumda konuşan olarak görülen adlar; "çevirme" listesine eklemek için öneri.
+    @Published private(set) var seenSpeakers: [String] = []
+
+    func addKeptTerm(_ raw: String) {
+        let term = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard term.count >= 2, !keptTerms.contains(where: { $0.caseInsensitiveCompare(term) == .orderedSame }) else { return }
+        keptTerms.append(term)
+        keptTerms.sort { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        applyKeptTerms()
+    }
+
+    func removeKeptTerm(_ term: String) {
+        keptTerms.removeAll { $0 == term }
+        applyKeptTerms()
+    }
+
+    private func applyKeptTerms() {
+        protector = TermProtector(terms: keptTerms)
+        saveGameProfile()
+    }
+
+    /// Çeviriyi telefonun kendi ekranında büyük yazıyla göster (televizyona bir şey kurulamayan markalar için).
+    @Published var phoneDisplay = false {
+        didSet {
+            if phoneDisplay { setDimmed(false) }
+            lastInteraction = Date()
+        }
+    }
+    /// Görev yazılarının ve konuşma seçeneklerinin çevirileri (telefon ekranında göstermek için).
+    @Published private(set) var hintItems: [ScreenItem] = []
+    @Published private(set) var choiceItems: [ScreenItem] = []
+    /// "Ekranı çevir"in sonucu ve çevrilen kare (telefon ekranında göstermek için).
+    @Published private(set) var screenItems: [ScreenItem] = []
+    @Published private(set) var screenFrame: CGImage?
+
     /// Altyazının ekrandaki yerini uygulama kendisi bulsun (sarı çerçeveyi elle yerleştirmeye gerek kalmasın).
     /// Kullanıcı çerçeveyi elle oynatırsa kapanır.
     @Published var autoRegion: Bool {
@@ -226,7 +292,11 @@ final class AppModel: ObservableObject {
     private let lockedFlag = Flag(false)
     @Published private(set) var locked = false
     /// Görev/ipucu yazısının çevirisi televizyonda özgün yazının hemen altında gösterilir.
-    private lazy var hud = HUDTranslator { [server] items in server.sendHUD(items: items) }
+    private lazy var hud = HUDTranslator { [overlay] items in overlay.set(hints: items) }
+    /// Konuşma seçeneklerinin çevirisi: listenin altında, numaralı.
+    private lazy var choices = HUDTranslator(kind: .choices) { [overlay] items in overlay.set(choices: items) }
+    /// Televizyonun köşe katmanı tektir: görev yazıları ile seçenekler birleştirilip yollanır.
+    private lazy var overlay = OverlayMerger(server: server)
     /// Görev bölgesinde en son okunan ham yazı ve izlenen yazılar (teşhis için).
     private var hudRaw = ""
     private var hudTracked = ""
@@ -275,6 +345,9 @@ final class AppModel: ObservableObject {
         gameAudioVolume = defaults.object(forKey: "gameAudioVolume") as? Double ?? 0.8
 
         hudEnabled = defaults.object(forKey: "hudEnabled") as? Bool ?? true
+        choicesEnabled = defaults.object(forKey: "choicesEnabled") as? Bool ?? true
+        let pace = defaults.double(forKey: "readingPace")
+        readingPace = pace > 0 ? pace : 1
         speechEnabled = defaults.bool(forKey: "speechEnabled")
         autoRegion = defaults.object(forKey: "autoRegion") as? Bool ?? true
         games = defaults.stringArray(forKey: "games") ?? []
@@ -288,7 +361,16 @@ final class AppModel: ObservableObject {
         reader.setRegion(region)
         hudFlag.value = hudEnabled
         hudReader.setRegion(hudRegion)
+        choiceFlag.value = choicesEnabled
+        keptTerms = profiles.profile(for: selectedGame)?.keptTerms ?? []
+        protector = TermProtector(terms: keptTerms)
         if profiles.profile(for: selectedGame) == nil { saveGameProfile() }
+        overlay.onChange = { [weak self] hints, choices in
+            DispatchQueue.main.async {
+                self?.hintItems = hints
+                self?.choiceItems = choices
+            }
+        }
         speechFlag.value = speechEnabled
         if speechEnabled { speech.start() }
         scanFlag.value = autoRegion
@@ -340,6 +422,9 @@ final class AppModel: ObservableObject {
                     guard let self else { return }
                     self.lines = lines
                     self.record(lines)
+                    for name in lines.compactMap(\.speaker) where !self.seenSpeakers.contains(name) && self.seenSpeakers.count < 40 {
+                        self.seenSpeakers.append(name)
+                    }
                     // Altyazıdan okunan satırlar (duyurular ve sesten gelenler hariç) ekranda mı?
                     let hasSubtitle = lines.contains { $0.id < 1_000_000 }
                     if self.subtitleOnScreen, !hasSubtitle { self.lastSubtitleGone = Date() }
@@ -350,6 +435,7 @@ final class AppModel: ObservableObject {
                 DispatchQueue.main.async { self?.aiProblem = message }
             }
             await pipeline.setQuickTranslator { text in await self?.quickTranslate(text) }
+            if let pace = self?.readingPace { await pipeline.setReadingPace(pace) }
             await self?.applyAIKey(KeychainStore.loadAIKey())
             for await lines in frames { await pipeline.ingest(lines) }
         }
@@ -366,9 +452,73 @@ final class AppModel: ObservableObject {
                 self.hudTracked = String(await hud.current.joined(separator: " | ").prefix(200))
             }
         }
+        // Konuşma seçenekleri: ekranın geri kalanını seyrek okuyan üçüncü hat.
+        let (choiceFrames, choiceFeed) = AsyncStream.makeStream(of: [RecognizedLine].self, bufferingPolicy: .bufferingNewest(1))
+        choiceReader.onLines = { choiceFeed.yield($0) }
+        Task { [weak self] in
+            guard let choices = self?.choices else { return }
+            // Tek kelimelik seçenekler ("Leave", "Yes") bağlamsız çevrilince saçmalıyor; önce sözlüğe bakılır.
+            await choices.setTranslator { text in
+                if let known = MenuGlossary.lookup(text) { return known }
+                return await self?.quickTranslate(text)
+            }
+            for await lines in choiceFrames {
+                guard let self, self.choicesEnabled else { continue }
+                await choices.ingest(lines, region: Self.choiceArea,
+                                     excluding: [self.region] + (self.hudEnabled ? [self.hudRegion] : []))
+            }
+        }
+        // "Ekranı çevir" anahtarsız da çalışır: yazılar cihaz üstü çeviriyle çevrilir.
+        screen.setLocalTranslator(LocalScreenTranslator { [weak self] texts in
+            await self?.quickTranslateBatch(texts) ?? texts.map { _ in nil }
+        })
+        screen.onItems = { [weak self] items, frame in
+            var image: CGImage?
+            if !items.isEmpty, let frame {
+                VTCreateCGImageFromCVPixelBuffer(frame, options: nil, imageOut: &image)
+            }
+            DispatchQueue.main.async {
+                self?.screenItems = items
+                self?.screenFrame = image
+            }
+        }
         #if DEBUG
         // Geliştirme sürümünde teşhis: telefonun gördüğü son kare yerel ağdan alınabilir (http://<telefon>:8080/kare.jpg).
-        pageServer.extra = { [reader] path in
+        // Çeviri denemesi: /cevir?t=<yazı>|<yazı> sıraya alır, /cevir sonuçları verir; /ad?t=<ad> "çevirme"
+        // listesine ekler; /ekran "ekranı çevir"i çalıştırır, /ekran-sonuc çevrilen öğeleri verir.
+        let debugLog = DebugLog()
+        pageServer.extra = { [reader, weak self] path in
+            let text = { (prefix: String) -> String? in
+                path.hasPrefix(prefix) ? String(path.dropFirst(prefix.count)).removingPercentEncoding : nil
+            }
+            if let query = text("/cevir?t=") {
+                Task { @MainActor in
+                    for piece in query.split(separator: "|").map(String.init) {
+                        let started = Date()
+                        let result = await self?.quickTranslate(piece) ?? "(çevrilemedi)"
+                        debugLog.add("\(piece)  =>  \(result)  [\(Int(Date().timeIntervalSince(started) * 1000)) ms]")
+                    }
+                }
+                return ("text/plain; charset=utf-8", Data("sıraya alındı\n".utf8))
+            }
+            if path == "/cevir" { return ("text/plain; charset=utf-8", Data(debugLog.text.utf8)) }
+            if let term = text("/ad?t=") {
+                Task { @MainActor in self?.addKeptTerm(term) }
+                return ("text/plain; charset=utf-8", Data("eklendi\n".utf8))
+            }
+            if path == "/ekran" {
+                Task { @MainActor in self?.toggleScreenTranslation() }
+                return ("text/plain; charset=utf-8", Data("istendi\n".utf8))
+            }
+            if path == "/ekran-sonuc" {
+                let lines = DispatchQueue.main.sync {
+                    MainActor.assumeIsolated {
+                        (self?.screenItems ?? []).map { String(format: "%.2f,%.2f  %@", $0.x, $0.y, $0.text) }
+                            + ["durum: \(self?.screenState ?? "kapalı")"]
+                    }
+                }
+                return ("text/plain; charset=utf-8", Data(lines.joined(separator: "\n").utf8))
+            }
             guard path == "/kare.jpg", let buffer = reader.latestFrame,
                   let space = CGColorSpace(name: CGColorSpace.sRGB),
                   let jpeg = CIContext().jpegRepresentation(of: CIImage(cvPixelBuffer: buffer), colorSpace: space) else { return nil }
@@ -439,7 +589,7 @@ final class AppModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
                 guard let self, !Task.isCancelled else { return }
                 // Örnek kipinde ekran kendiliğinden kararmaz: gösterilen şey ekranın kendisidir.
-                if !self.dimmed, !self.demo, self.connection == .connected,
+                if !self.dimmed, !self.demo, !self.phoneDisplay, self.connection == .connected,
                    Date().timeIntervalSince(self.lastInteraction) >= self.autoDimAfter {
                     self.setDimmed(true)
                 }
@@ -512,6 +662,10 @@ final class AppModel: ObservableObject {
                     "samsungİzin": self.samsungReadyForInstall,
                     "samsungSertifika": self.hasSamsungCertificates,
                     "görev": self.hudEnabled,
+                    "seçenek": self.choicesEnabled ? self.choiceItems.map(\.text).joined(separator: " | ") : "kapalı",
+                    "seçenekOkuma": (self.choiceReader.lastReadDuration * 1000).rounded(),
+                    "telefonEkranı": self.phoneDisplay,
+                    "adlar": self.keptTerms.count,
                     "görevBölge": [self.hudRegion.minX, self.hudRegion.minY, self.hudRegion.width, self.hudRegion.height].map { (Double($0) * 100).rounded() / 100 },
                     "görevOkunan": self.hudRaw,
                     "görevİzlenen": self.hudTracked,
@@ -769,11 +923,14 @@ final class AppModel: ObservableObject {
             let lockedFlag = self.lockedFlag
             let scanReader = self.scanReader
             let scanFlag = self.scanFlag
+            let choiceReader = self.choiceReader
+            let choiceFlag = self.choiceFlag
             session.onFrame = { frame in
                 guard !lockedFlag.value else { return }
                 reader.submit(frame)
                 if scanFlag.value { scanReader.submit(frame) }
                 if hudFlag.value { hudReader.submit(frame) }
+                if choiceFlag.value { choiceReader.submit(frame) }
             }
             if gameAudioEnabled || speechEnabled {
                 // Oyun sesi iki işe yarar: telefondan çalmak (isteğe bağlı) ve konuşmayı yazıya dökmek (deneysel).
@@ -809,6 +966,7 @@ final class AppModel: ObservableObject {
         gameAudio.stop()
         Task { await pipeline.reset() }
         Task { await hud.reset() }
+        Task { await choices.reset() }
     }
 
     private func handle(_ event: RemotePlaySession.Event, generation current: Int) {
@@ -862,11 +1020,42 @@ final class AppModel: ObservableObject {
 
     /// Hızlı (cihaz üstü) çeviri; yapay zekâ çevirisi gelene kadar ekranda bu görünür.
     private func quickTranslate(_ text: String) async -> String? {
-        if let translationSession, let translated = try? await translationSession.translate(text).targetText {
-            return translated
+        if let translationSession {
+            // Oyunun "çevirme" listesindeki adlar korunarak çevrilir; koruma çeviride bozulursa korumasız çevrilir.
+            let protected = protector.protect(text)
+            if !protected.isEmpty,
+               let translated = try? await translationSession.translate(protected.text).targetText,
+               let restored = protector.restore(translated, from: protected) {
+                return restored
+            }
+            if let translated = try? await translationSession.translate(text).targetText { return translated }
         }
         // Örnek kipinde çeviri dili yoksa sahnenin hazır çevirisi kullanılır.
         return demo ? DemoScene.translation(for: text) : nil
+    }
+
+    /// Birçok yazıyı tek seferde çevirir ("ekranı çevir" için); sonuç aynı sırada döner.
+    private func quickTranslateBatch(_ texts: [String]) async -> [String?] {
+        var results = [String?](repeating: nil, count: texts.count)
+        if let translationSession {
+            let protected = texts.map { protector.protect($0) }
+            let requests = protected.enumerated().map {
+                TranslationSession.Request(sourceText: $0.element.text, clientIdentifier: String($0.offset))
+            }
+            if let responses = try? await translationSession.translations(from: requests) {
+                for response in responses {
+                    guard let index = response.clientIdentifier.flatMap({ Int($0) }), results.indices.contains(index) else { continue }
+                    results[index] = protected[index].isEmpty
+                        ? response.targetText
+                        : protector.restore(response.targetText, from: protected[index])
+                }
+            }
+        }
+        // Toplu çeviride eksik kalanlar tek tek denenir (örnek kipinde hazır çeviriler buradan gelir).
+        for index in results.indices where results[index] == nil {
+            results[index] = await quickTranslate(texts[index])
+        }
+        return results
     }
 
     /// Yapay zekâ çevirisi için Anthropic API anahtarı; boş verilirse kapatılır.
@@ -920,11 +1109,14 @@ final class AppModel: ObservableObject {
         timer.schedule(deadline: .now(), repeating: 0.1)
         let scanReader = self.scanReader
         let scanFlag = self.scanFlag
+        let choiceReader = self.choiceReader
+        let choiceFlag = self.choiceFlag
         timer.setEventHandler {
             guard !lockedFlag.value, let frame = scene.frame(at: Date().timeIntervalSince(started)) else { return }
             reader.submit(frame)
             if scanFlag.value { scanReader.submit(frame) }
             if hudFlag.value { hudReader.submit(frame) }
+            if choiceFlag.value { choiceReader.submit(frame) }
         }
         timer.resume()
         demoTimer = timer
@@ -940,6 +1132,7 @@ final class AppModel: ObservableObject {
         Task {
             await pipeline.reset()
             await hud.reset()
+            await choices.reset()
         }
         if credentials != nil { connect() }
     }
@@ -956,6 +1149,7 @@ final class AppModel: ObservableObject {
         Task {
             await pipeline.reset()
             await hud.reset()
+            await choices.reset()
             // Televizyona bakan kişi neden yazı gelmediğini bilsin.
             await pipeline.announce(label: "Marhilk", source: "", translation: "Abonelik gerekli. Telefonda Marhilk'i aç.", duration: 12)
         }
@@ -993,11 +1187,17 @@ final class AppModel: ObservableObject {
         lastAutoRegionChange = .distantPast
         selectedGame = name
         defaults.set(name, forKey: "gameSelected")
-        guard let saved = profiles.profile(for: name) else { return saveGameProfile() }
+        guard let saved = profiles.profile(for: name) else {
+            keptTerms = []
+            protector = TermProtector(terms: [])
+            return saveGameProfile()
+        }
         applyingProfile = true
         if let rect = saved.regionRect { region = rect }
         if let rect = saved.hudRegionRect { hudRegion = rect }
         hudEnabled = saved.hudEnabled
+        keptTerms = saved.keptTerms ?? []
+        protector = TermProtector(terms: keptTerms)
         applyingProfile = false
     }
 
@@ -1023,7 +1223,7 @@ final class AppModel: ObservableObject {
 
     private func saveGameProfile() {
         guard !applyingProfile else { return }
-        profiles.save(GameProfile(region: region, hudRegion: hudRegion, hudEnabled: hudEnabled), for: selectedGame)
+        profiles.save(GameProfile(region: region, hudRegion: hudRegion, hudEnabled: hudEnabled, keptTerms: keptTerms), for: selectedGame)
     }
 
     // MARK: - Konuşma geçmişi
@@ -1079,3 +1279,54 @@ enum LocalNetwork {
         return nil
     }
 }
+
+/// Televizyonun köşe katmanı tek iletiyle güncellenir; görev yazıları ile konuşma seçenekleri ayrı
+/// hatlardan gelir. Burada birleştirilip birlikte yollanır.
+final class OverlayMerger: @unchecked Sendable {
+    private let lock = NSLock()
+    private var hints: [ScreenItem] = []
+    private var choices: [ScreenItem] = []
+    private let server: SubtitleServer
+    /// Her değişiklikte çağrılır (telefon ekranında göstermek için).
+    var onChange: (@Sendable ([ScreenItem], [ScreenItem]) -> Void)?
+
+    init(server: SubtitleServer) {
+        self.server = server
+    }
+
+    func set(hints items: [ScreenItem]) {
+        update { hints = items }
+    }
+
+    func set(choices items: [ScreenItem]) {
+        update { choices = items }
+    }
+
+    private func update(_ change: () -> Void) {
+        lock.lock()
+        change()
+        let hints = self.hints, choices = self.choices
+        lock.unlock()
+        server.sendHUD(items: hints + choices)
+        onChange?(hints, choices)
+    }
+}
+
+#if DEBUG
+/// Deneme çıktıları (yalnız geliştirme sürümünde, yerel ağdan okunur).
+final class DebugLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+    func add(_ line: String) {
+        lock.lock()
+        lines.append(line)
+        if lines.count > 200 { lines.removeFirst(lines.count - 200) }
+        lock.unlock()
+    }
+    var text: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return lines.joined(separator: "\n") + "\n"
+    }
+}
+#endif

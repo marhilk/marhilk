@@ -31,6 +31,7 @@ struct SetupView: View {
         }
 
         /// Bu marka için televizyon uygulaması var mı?
+        /// Televizyona Marhilk kurulabiliyor mu? Kurulamayan markalarda çeviri telefonun ekranında gösterilir.
         var supported: Bool { self == .samsung || self == .lg }
     }
 
@@ -59,13 +60,15 @@ struct SetupView: View {
 
     private var paired: Bool { model.credentials != nil }
     private var tvBrand: TVBrand? { TVBrand(rawValue: tvBrandRaw) }
+    /// Seçilen markada televizyona Marhilk kurulamıyor; çeviri telefonun ekranında gösterilecek.
+    private var phoneOnly: Bool { tvBrand.map { !$0.supported } ?? false }
 
     /// Bu adımda kullanıcının tek tek onaylaması gereken madde sayısı.
     private var actionCount: Int {
         switch step {
         case .account, .remotePlay: return instructions.count
         case .code: return paired ? 0 : 2
-        case .tv: return model.tvCount > 0 || tvBrand == .samsung ? 0 : instructions.count
+        case .tv: return (model.tvCount > 0 && !phoneOnly) || tvBrand == .samsung ? 0 : instructions.count
         default: return 0
         }
     }
@@ -78,7 +81,7 @@ struct SetupView: View {
             progress
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Illustration(step: step)
+                    Illustration(step: step, phoneOnly: phoneOnly)
                     Text(title).font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
                     Text(LocalizedStringKey(summary))
                         .font(.callout)
@@ -207,7 +210,7 @@ struct SetupView: View {
 
     private var canContinue: Bool {
         switch step {
-        case .tvBrand: return tvBrand?.supported == true
+        case .tvBrand: return tvBrand != nil
         case .login: return model.accountID != nil
         case .console: return paired || !host.isEmpty
         case .code: return paired
@@ -218,7 +221,7 @@ struct SetupView: View {
     private var primaryLabel: String {
         switch step {
         case .welcome: return "Başlayalım"
-        case .tv: return model.tvCount > 0 ? "Devam" : "TV'yi sonra bağlayacağım"
+        case .tv: return model.tvCount > 0 || phoneOnly ? "Devam" : "TV'yi sonra bağlayacağım"
         case .ready: return "Çeviriyi başlat"
         default: return "Devam"
         }
@@ -235,7 +238,7 @@ struct SetupView: View {
         case .login: return "İkinci hesapla giriş yap"
         case .console: return "PS5'ini seç"
         case .code: return "PS5'teki kodu gir"
-        case .tv: return "Televizyonu bağla"
+        case .tv: return phoneOnly ? "Telefonu ekran olarak kullan" : "Televizyonu bağla"
         case .ready: return "Hazırsın"
         }
     }
@@ -257,6 +260,9 @@ struct SetupView: View {
         case .code:
             return "PS5 sana 8 haneli bir kod verecek. Kod birkaç dakika geçerlidir."
         case .tv:
+            if phoneOnly {
+                return "Bu markada televizyona Marhilk kurulamıyor. Çeviriler **bu telefonun ekranında**, uzaktan okunacak büyüklükte akar; televizyona hiçbir şey kurman gerekmez. Her maddeyi yapınca alttaki düğmeye bas."
+            }
             return tvBrand == .lg
                 ? "Çeviriler LG televizyonunun tarayıcısında açılan Marhilk sayfasında görünür. Her maddeyi yapınca alttaki düğmeye bas."
                 : "Çeviriler televizyondaki Marhilk uygulamasında görünür. Uygulamayı televizyona bu telefon kurar; bir kez yapılır."
@@ -296,7 +302,9 @@ struct SetupView: View {
         case .ready:
             return ["PS5'te **kendi hesabına** dön ve oyununu aç. İkinci hesap yalnız bağlantı içindi.",
                     "Oyunun ayarlarından **altyazıyı aç**; dili **İngilizce** olsun. Marhilk ekrandaki İngilizce yazıyı çevirir.",
-                    "Bundan sonra oynamadan önce yalnız telefonda **Marhilk'i aç**. Televizyondaki uygulamayı telefon kendisi açar; sonra telefonu kilitleyebilirsin."]
+                    phoneOnly
+                        ? "Bundan sonra oynamadan önce telefonda **Marhilk'i aç** ve televizyonun altına yatay koy. Çeviri telefonun ekranında akar; telefonu kilitleme."
+                        : "Bundan sonra oynamadan önce yalnız telefonda **Marhilk'i aç**. Televizyondaki uygulamayı telefon kendisi açar; sonra telefonu kilitleyebilirsin."]
         }
     }
 
@@ -311,7 +319,9 @@ struct SetupView: View {
                     "Sayfa açılınca kumandada **Tamam**'a bas: görüntü tam ekran olur.",
                     "PS5 görüntüsü gelmediyse kumandada **KIRMIZI** tuşa bas; sıradaki HDMI girişine geçer."]
         case .android, .other:
-            return []
+            return ["Telefonu **şarja tak**: çeviri sürerken ekran açık kalır.",
+                    "Telefonu televizyonun **hemen altına**, **yatay** olarak yasla. Bir telefon standı ya da kılıfın ayağı işini görür.",
+                    "PS5 bağlanınca çeviri ekranı kendiliğinden açılır. Açılmazsa ana ekranda **Telefonda göster**'e bas."]
         }
     }
 
@@ -352,9 +362,10 @@ struct SetupView: View {
                                 Text(brand.title).fontWeight(.semibold)
                                 Text(brand.detail).font(.caption).foregroundStyle(.secondary)
                             }
+                            .multilineTextAlignment(.leading)
                             Spacer()
                             if !brand.supported {
-                                Text("yakında").font(.caption2).foregroundStyle(.secondary)
+                                Text("telefon ekranıyla").font(.caption2).foregroundStyle(.secondary)
                             }
                             Image(systemName: tvBrand == brand ? "checkmark.circle.fill" : "circle")
                                 .foregroundStyle(tvBrand == brand ? Color.yellow : Color.secondary)
@@ -365,8 +376,8 @@ struct SetupView: View {
                     .foregroundStyle(.primary)
                 }
                 if let tvBrand, !tvBrand.supported {
-                    Banner(text: "Marhilk şimdilik Samsung ve LG televizyonlarda çalışıyor. \(tvBrand == .other ? "Diğer markalar" : tvBrand.title) için destek hazırlanıyor.",
-                           color: .orange, icon: "clock.fill")
+                    Banner(text: "Bu markada çeviri televizyonun üstünde değil, telefonunun ekranında gösterilir: telefonu televizyonun altına yatay koyarsın. Televizyona bir şey kurman gerekmez.",
+                           color: .yellow, icon: "iphone.landscape")
                 }
             }
 
@@ -427,6 +438,10 @@ struct SetupView: View {
             if model.tvCount > 0 {
                 Banner(text: "Televizyon bağlandı.", color: .green, icon: "checkmark.circle.fill")
             }
+
+        case .tv where phoneOnly:
+            Banner(text: "Yazının yönünü ve boyutunu sonradan değiştirebilirsin: çeviri ekranındayken dokun, sağ üstteki düğmeler çıkar.",
+                   color: .yellow, icon: "hand.tap.fill")
 
         case .tv:
             if tvBrand == .lg {
@@ -596,6 +611,8 @@ private struct Note: View {
 /// Her adımın üstündeki çizim: kullanıcının PS5'te ya da TV'de göreceği ekranın sadeleştirilmiş hâli.
 private struct Illustration: View {
     let step: SetupView.Step
+    /// Çeviri televizyonda değil telefonun ekranında gösterilecek (Samsung ve LG dışındaki markalar).
+    var phoneOnly = false
 
     var body: some View {
         Group {
@@ -662,6 +679,12 @@ private struct Illustration: View {
                             .font(.system(size: 8))
                             .foregroundStyle(.secondary)
                     }
+                }
+            case .tv where phoneOnly:
+                VStack(spacing: 8) {
+                    Image(systemName: "tv").font(.system(size: 64)).foregroundStyle(.secondary)
+                    Image(systemName: "iphone.landscape").font(.system(size: 40, weight: .semibold)).foregroundStyle(.yellow)
+                    Text("Türkçe yazı telefonda").font(.caption).foregroundStyle(.secondary)
                 }
             case .tv:
                 TVFrame {

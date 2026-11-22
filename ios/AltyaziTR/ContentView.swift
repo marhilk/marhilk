@@ -66,6 +66,7 @@ private struct TranslationSetup: ViewModifier {
 /// Ana ekran: üstte tek bakışta durum, ortada oyun görüntüsü ve canlı çeviri. Ayarlar ayrı sayfadadır.
 private struct WatchView: View {
     @EnvironmentObject private var model: AppModel
+    @AppStorage("tvBrand") private var tvBrand = ""
     @State private var showSettings: Bool = {
         #if DEBUG
         // Ekran görüntüsü almak için: `-debugSettings YES` ayarlar sayfasını açık başlatır.
@@ -117,14 +118,33 @@ private struct WatchView: View {
                 .sheet(isPresented: $showSettings) { SettingsSheet() }
                 .sheet(isPresented: $showPaywall) { PaywallView() }
                 .onAppear { if model.locked { showPaywall = true } }
+                #if DEBUG
+                // Ekran görüntüsü almak için: `-debugPhone YES` telefon ekranı kipini, `-debugScreen YES`
+                // birkaç saniye sonra "ekranı çevir"i açar.
+                .task {
+                    if UserDefaults.standard.bool(forKey: "debugPhone") { model.phoneDisplay = true }
+                    if UserDefaults.standard.bool(forKey: "debugScreen") {
+                        try? await Task.sleep(nanoseconds: 14_000_000_000)
+                        model.toggleScreenTranslation()
+                    }
+                }
+                #endif
                 .onChange(of: model.locked) { _, locked in if locked { showPaywall = true } }
                 .environment(\.openPaywall, { showPaywall = true })
             }
 
+            if model.phoneDisplay { PhoneDisplayView() }
             if model.dimmed { DarkScreen() }
         }
-        .statusBarHidden(model.dimmed)
-        .persistentSystemOverlays(model.dimmed ? .hidden : .automatic)
+        .statusBarHidden(model.dimmed || model.phoneDisplay)
+        .persistentSystemOverlays(model.dimmed || model.phoneDisplay ? .hidden : .automatic)
+        // Televizyonuna Marhilk kurulamayanlarda çevirinin görüneceği tek yer telefonun ekranıdır:
+        // PS5 bağlanınca kendiliğinden açılır.
+        .onChange(of: model.connection) { _, connection in
+            if connection == .connected, TVSupport.phoneOnly(tvBrand), model.tvCount == 0, !model.demo {
+                model.phoneDisplay = true
+            }
+        }
     }
 }
 
@@ -189,12 +209,15 @@ private struct StatusHero: View {
 
     private enum Overall { case running, waitingForTV, connecting(String), failed(String), idle, locked }
 
+    /// Bu markada televizyona Marhilk kurulamıyor; çeviri telefonun ekranında gösterilir.
+    private var phoneOnly: Bool { TVSupport.phoneOnly(tvBrand) }
+
     private var overall: Overall {
         if model.locked { return .locked }
         // Örnek kipinde televizyon şart değil: çeviri telefonda da izlenir.
         if model.demo { return .running }
         switch model.connection {
-        case .connected: return model.tvCount > 0 ? .running : .waitingForTV
+        case .connected: return model.tvCount > 0 || phoneOnly ? .running : .waitingForTV
         case .working(let step): return .connecting(step)
         case .failed(let message): return .failed(message)
         case .idle: return .idle
@@ -207,9 +230,13 @@ private struct StatusHero: View {
             HStack(spacing: 10) {
                 DeviceChip(symbol: "gamecontroller.fill", name: model.credentials?.nickname ?? "PS5",
                            state: psState, color: psColor)
-                DeviceChip(symbol: "tv", name: "Televizyon",
-                           state: model.tvCount > 0 ? "Bağlı" : "Bekleniyor",
-                           color: model.tvCount > 0 ? .green : .orange)
+                if phoneOnly, model.tvCount == 0 {
+                    DeviceChip(symbol: "iphone.landscape", name: "Telefon", state: "Ekran hazır", color: .green)
+                } else {
+                    DeviceChip(symbol: "tv", name: "Televizyon",
+                               state: model.tvCount > 0 ? "Bağlı" : "Bekleniyor",
+                               color: model.tvCount > 0 ? .green : .orange)
+                }
             }
             actions
             // Örnek kipinde çeviri dili eksik olsa da sahnenin hazır çevirisi gösterilir; uyarıya gerek yok.
@@ -278,6 +305,13 @@ private struct StatusHero: View {
                     Text(error).font(.footnote).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
                 }
             }
+        } else if phoneOnly, model.tvCount == 0, !model.demo, case .connected = model.connection {
+            Button {
+                model.phoneDisplay = true
+            } label: {
+                Label("Çeviriyi telefonda göster", systemImage: "iphone.landscape")
+            }
+            .buttonStyle(ProminentAction())
         } else if model.tvCount == 0, !model.demo, case .connected = model.connection {
             if tvBrand == "lg" {
                 VStack(alignment: .leading, spacing: 4) {
@@ -318,7 +352,9 @@ private struct StatusHero: View {
         switch overall {
         case .running: return model.demo
             ? "Örnek sahnedeki konuşmalar çevriliyor; aşağıda canlı çeviride görebilirsin. Televizyonun bağlıysa orada da görünür."
-            : "Oyununu oyna; konuşmalar televizyonda Türkçe akar. Telefonu kilitleyebilirsin."
+            : (phoneOnly && model.tvCount == 0
+                ? "Telefonu televizyonun altına yatay koy; konuşmalar telefonun ekranında Türkçe akar."
+                : "Oyununu oyna; konuşmalar televizyonda Türkçe akar. Telefonu kilitleyebilirsin.")
         case .waitingForTV: return "Çeviri hazır. Görmek için televizyonda Marhilk açık olmalı."
         case .connecting(let step): return step
         case .failed(let message): return message
@@ -613,6 +649,11 @@ private struct QuickActions: View {
                     model.setDimmed(true)
                 }
             }
+            ActionTile(symbol: "iphone.landscape", title: "Telefonda göster",
+                       detail: "Çeviri bu ekranda, büyük yazıyla. Televizyona bir şey kurmadan da çalışır.",
+                       highlighted: false, compact: true) {
+                model.phoneDisplay = true
+            }
             Text("Ekranı çevir: oyunu duraklat, sonra bas (ya da TV kumandasında MAVİ tuş). Menü, görev ve belgeler yerinde Türkçe görünür.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -625,7 +666,7 @@ private struct QuickActions: View {
         switch model.screenState {
         case nil: return "Menüler, belgeler"
         case "working": return "Çevriliyor…"
-        case "done": return "Televizyonda"
+        case "done": return model.tvCount > 0 ? "Televizyonda" : "Çevrildi"
         case .some(let message): return message
         }
     }
@@ -636,11 +677,15 @@ private struct ActionTile: View {
     let title: String
     let detail: String
     let highlighted: Bool
+    /// Tam genişlikte, alçak düzen: simge solda, yazı sağda.
+    var compact = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
+            let layout = compact ? AnyLayout(HStackLayout(alignment: .center, spacing: 14))
+                                 : AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            layout {
                 Image(systemName: symbol)
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(highlighted ? Color.black : Color.yellow)
@@ -649,7 +694,7 @@ private struct ActionTile: View {
                     Text(detail).font(.caption).foregroundStyle(highlighted ? Color.black.opacity(0.7) : Color.secondary).lineLimit(2)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 84, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: compact ? 44 : 84, alignment: .leading)
             .padding(14)
             .background(highlighted ? Color.yellow : Color(.secondarySystemGroupedBackground),
                         in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -711,6 +756,28 @@ private struct SettingsSheet: View {
                     Text("Görünüm")
                 } footer: {
                     Text("Değişiklikler televizyonda anında görünür. Konuşanları renklendirince her kişi kendi rengini alır; kalabalık sahnelerde kimin konuştuğu daha kolay izlenir.")
+                }
+
+                Section {
+                    Picker("Yazının ekranda kalma süresi", selection: $model.readingPace) {
+                        Text("Kısa").tag(0.75)
+                        Text("Olağan").tag(1.0)
+                        Text("Uzun").tag(1.6)
+                    }
+                    Toggle("Konuşma seçeneklerini çevir", isOn: $model.choicesEnabled)
+                    NavigationLink {
+                        KeptTermsView()
+                    } label: {
+                        HStack {
+                            Text("Çevrilmeyecek adlar")
+                            Spacer()
+                            Text(model.keptTerms.isEmpty ? "Yok" : "\(model.keptTerms.count)").foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("Çeviri")
+                } footer: {
+                    Text("Kalma süresi: oyun bir repliği çabuk kaldırdığında çevirisi okunsun diye ekranda bekletilir; yavaş okuyorsan \"Uzun\" seç. Konuşma seçenekleri: oyun sana bir seçim sunduğunda seçeneklerin Türkçesi listenin altında numaralı görünür. Çevrilmeyecek adlar: karakter ve yer adları çeviride olduğu gibi kalır (\"Ghost\", \"Hayalet\" olmaz).")
                 }
 
                 Section {
@@ -782,8 +849,8 @@ private struct SettingsSheet: View {
                     Text("Yapay zekâ anahtarı")
                 } footer: {
                     Text(model.aiProblem ?? (model.aiEnabled
-                         ? "Anahtar kayıtlı. Yalnız \"ekranı çevir\" için kullanılır; canlı altyazı hız için cihazda çevrilir."
-                         : "İsteğe bağlı. Anahtar olmadan \"ekranı çevir\" çalışmaz; canlı altyazı bundan etkilenmez."))
+                         ? "Anahtar kayıtlı. \"Ekranı çevir\" yapay zekâyla, bağlamı bilerek çevirir; canlı altyazı hız için cihazda çevrilir."
+                         : "İsteğe bağlı. \"Ekranı çevir\" anahtar olmadan da telefonda çevirir; anahtar girilirse menü ve belgeler daha doğal çevrilir."))
                         .foregroundStyle(model.aiProblem == nil ? Color.secondary : Color.orange)
                 }
 
@@ -866,14 +933,6 @@ private struct SubtitleSample: View {
     private func speakerColor(_ name: String) -> Color {
         let palette = SubtitleAppearance.speakerPalette
         return Color(hex: appearance.speakerColors ? palette[SubtitleAppearance.paletteIndex(for: name)] : palette[0])
-    }
-}
-
-private extension Color {
-    /// "#rrggbb" biçimindeki renk.
-    init(hex: String) {
-        let value = UInt32(hex.dropFirst(), radix: 16) ?? 0xFFFFFF
-        self.init(red: Double((value >> 16) & 0xFF) / 255, green: Double((value >> 8) & 0xFF) / 255, blue: Double(value & 0xFF) / 255)
     }
 }
 
@@ -1026,3 +1085,80 @@ private struct TouchObserver: UIViewRepresentable {
     }
 }
 
+
+/// Seçili oyunda çevrilmeyecek adların listesi: karakter, yer, silah adları çeviride olduğu gibi kalır.
+private struct KeptTermsView: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var newTerm = ""
+
+    /// Bu oturumda konuşan olarak görülen, henüz listede olmayan adlar.
+    private var suggestions: [String] {
+        model.seenSpeakers.filter { name in
+            !model.keptTerms.contains { $0.caseInsensitiveCompare(name) == .orderedSame }
+        }
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                HStack {
+                    TextField("Ad (ör. Ghost)", text: $newTerm)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                        .onSubmit(add)
+                    Button("Ekle", action: add)
+                        .disabled(newTerm.trimmingCharacters(in: .whitespaces).count < 2)
+                }
+            } footer: {
+                Text("Ad, oyunda yazıldığı gibi girilir. Yalnız baş harfi büyük yazıldığında korunur: \"Ghost\" olduğu gibi kalır, cümle içindeki \"ghost\" (hayalet) çevrilir.")
+            }
+
+            if !suggestions.isEmpty {
+                Section {
+                    ForEach(suggestions, id: \.self) { name in
+                        Button {
+                            model.addKeptTerm(name)
+                        } label: {
+                            Label(name, systemImage: "plus.circle.fill")
+                        }
+                    }
+                } header: {
+                    Text("Bu oturumda konuşanlar")
+                } footer: {
+                    Text("Dokununca listeye eklenir.")
+                }
+            }
+
+            Section {
+                if model.keptTerms.isEmpty {
+                    Text("Henüz ad eklenmedi.").foregroundStyle(.secondary)
+                }
+                ForEach(model.keptTerms, id: \.self) { term in
+                    Text(term)
+                }
+                .onDelete { offsets in
+                    for term in offsets.map({ model.keptTerms[$0] }) { model.removeKeptTerm(term) }
+                }
+            } header: {
+                Text(model.selectedGame.isEmpty ? "Çevrilmeyecek adlar" : "“\(model.selectedGame)” için")
+            } footer: {
+                Text("Silmek için adı sola kaydır. Liste her oyun için ayrı tutulur; oyunu ana ekrandaki oyun menüsünden seçersin.")
+            }
+        }
+        .navigationTitle("Çevrilmeyecek adlar")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func add() {
+        model.addKeptTerm(newTerm)
+        newTerm = ""
+    }
+}
+
+/// Televizyon markasına göre çevirinin nerede gösterileceği.
+enum TVSupport {
+    /// Bu markalarda televizyona Marhilk kurulamıyor; çeviri telefonun ekranında gösterilir.
+    static func phoneOnly(_ brand: String) -> Bool {
+        brand == "android" || brand == "other"
+    }
+}

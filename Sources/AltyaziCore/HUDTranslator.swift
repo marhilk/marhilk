@@ -22,6 +22,9 @@ struct HUDTracker {
         var missed = 0
     }
 
+    /// Tek kelimelik yazılar da izlensin mi? Görev yazılarında hayır (çoğu tabela kırıntısıdır);
+    /// konuşma seçeneklerinde evet ("Leave", "Attack").
+    var allowsSingleWords = false
     /// Bir yazının "var" sayılması için gereken art arda okuma sayısı.
     var appearAfter = 2
     /// Bir yazının kalkması için gereken art arda kaçırma sayısı (okuma sıklaştığı için üç: titremesin).
@@ -46,9 +49,10 @@ struct HUDTracker {
     /// Bir okumanın sonucunu işler. `lines` okunan bölgeye görelidir; `region` o bölgenin karedeki yeridir.
     mutating func update(lines: [RecognizedLine], region: CGRect) {
         var matched = Set<Int>()
-        for block in Self.blocks(from: lines) {
+        // Seçenek listesinde her satır ayrı bir seçenektir; yalnız küçük harfle başlayan satır üsttekinin devamıdır.
+        for block in Self.blocks(from: lines, onlyLowercaseContinues: allowsSingleWords) {
             let source = block.map(\.text).joined(separator: " ")
-            guard Self.isWorthTranslating(source) else { continue }
+            guard Self.isWorthTranslating(source, allowsSingleWords: allowsSingleWords) else { continue }
             let left = block.map(\.x).min()!
             let right = block.map { $0.x + $0.width }.max()!
             let top = block.map { $0.y - $0.height / 2 }.min()!
@@ -114,7 +118,7 @@ struct HUDTracker {
     /// Alt satır küçük harfle başlıyorsa kesin devamdır. Büyük harfle başlıyorsa, üst satır cümleyi
     /// bitirmemişse ve kutuyu dolduracak kadar uzunsa yine devam sayılır; kısa satırlar alt alta duran
     /// ayrı maddelerdir ("Mangayı takip et" / "Kuleyi yok et").
-    static func blocks(from lines: [RecognizedLine]) -> [[RecognizedLine]] {
+    static func blocks(from lines: [RecognizedLine], onlyLowercaseContinues: Bool = false) -> [[RecognizedLine]] {
         var result: [[RecognizedLine]] = []
         for line in lines.sorted(by: { $0.y < $1.y }) {
             if let block = result.last, let last = block.last, let first = line.text.first,
@@ -122,7 +126,7 @@ struct HUDTracker {
                line.y - last.y < max(last.height, line.height) * 1.7 {
                 let widest = max(block.map(\.width).max() ?? 0, line.width)
                 let lastFinished = last.text.last.map { ".!?:".contains($0) } ?? false
-                if first.isLowercase || (!lastFinished && last.width >= widest * 0.6) {
+                if first.isLowercase || (!onlyLowercaseContinues && !lastFinished && last.width >= widest * 0.6) {
                     result[result.count - 1].append(line)
                     continue
                 }
@@ -138,10 +142,11 @@ struct HUDTracker {
     }
 
     /// Sayaç, mesafe, cephane gibi yazılar ve tek kelimelik parçalar (çoğu tabela kırıntısıdır) çevrilmez.
-    static func isWorthTranslating(_ text: String) -> Bool {
+    static func isWorthTranslating(_ text: String, allowsSingleWords: Bool = false) -> Bool {
         let letters = text.filter(\.isLetter).count
         let digits = text.filter(\.isNumber).count
         let words = text.split(separator: " ").filter { $0.filter(\.isLetter).count >= 2 }.count
+        if allowsSingleWords { return letters >= 2 && letters > digits * 2 && words >= 1 }
         return letters >= 6 && letters > digits * 2 && words >= 2
     }
 }
@@ -151,6 +156,15 @@ struct HUDTracker {
 /// Bir yazı bir kez çevrilir; gösterilen çeviri sonradan değişmez.
 public actor HUDTranslator {
     public typealias Translate = @Sendable (String) async -> String?
+
+    /// Neyin izlendiği. Görev/ipucu yazıları tek tek de gösterilir. Konuşma seçenekleri ise bir LİSTEDİR:
+    /// alt alta duran 2–6 kısa yazı birlikte belirir; tek başına duran yazı (tabela, uyarı) seçenek değildir.
+    public enum Kind: Sendable {
+        case hints
+        case choices
+    }
+
+    private let kind: Kind
 
     private var tracker = HUDTracker()
     private var translate: Translate?
@@ -163,9 +177,16 @@ public actor HUDTranslator {
     /// Özgün yazı ile çevirisi arasındaki boşluk (kare yüksekliğine oranla).
     static let gap = 0.008
 
-    public init(send: @escaping @Sendable ([ScreenItem]) -> Void) {
+    public init(kind: Kind = .hints, send: @escaping @Sendable ([ScreenItem]) -> Void) {
+        self.kind = kind
         self.send = send
+        if kind == .choices { tracker.allowsSingleWords = true }
     }
+
+    /// Bir seçenek listesinde olabilecek seçenek sayısı. Daha uzun listeler menüdür ("ekranı çevir"in işi).
+    static let choiceCount = 2...6
+    /// Bir seçenek en çok bu kadar kelimedir; daha uzunu paragraf ya da belgedir.
+    static let choiceWordLimit = 16
 
     public func setTranslator(_ translate: Translate?) {
         self.translate = translate
@@ -205,11 +226,18 @@ public actor HUDTranslator {
         return missing.isEmpty ? translated : missing.map { "[\($0)]" }.joined(separator: " ") + " " + translated
     }
 
-    public func ingest(_ lines: [RecognizedLine], region: CGRect) {
-        tracker.update(lines: lines, region: region)
+    /// `excluding`: karenin bu bölgelerine düşen satırlar yok sayılır (başka bir okuyucunun alanı;
+    /// aynı yazı iki kez çevrilmesin).
+    public func ingest(_ lines: [RecognizedLine], region: CGRect, excluding: [CGRect] = []) {
+        let kept = excluding.isEmpty ? lines : lines.filter { line in
+            let center = CGPoint(x: region.minX + (line.x + line.width / 2) * region.width,
+                                 y: region.minY + line.y * region.height)
+            return !excluding.contains { $0.contains(center) }
+        }
+        tracker.update(lines: kept, region: region)
         // Çeviri ayrı yürür: yavaş ya da takılan bir çeviri okuma döngüsünü bekletmez
         // (bekletseydi ekrandaki yazı kalkması gerekirken takılı kalırdı).
-        for entry in tracker.stable where cache[entry.source] == nil && !pending.contains(entry.source) {
+        for entry in shown.joined() where cache[entry.source] == nil && !pending.contains(entry.source) {
             guard let translate else { break }
             let source = entry.source
             let numbered = Self.numbered(source)
@@ -235,32 +263,58 @@ public actor HUDTranslator {
         pending.remove(source)
         // Çeviri alınamadıysa (dil paketi henüz hazır değil) sonraki okumada yeniden denenir.
         guard let result, !result.isEmpty else { return }
-        let same = SubtitleTracker.similarity(numbered.text, result) >= 0.95
+        // Görev yazısında çeviri özgünle aynıysa (ad, marka) gösterilmez. Seçenek listesinde gösterilir:
+        // listede bir satır eksik kalırsa numaralar kayar.
+        let same = kind == .hints && SubtitleTracker.similarity(numbered.text, result) >= 0.95
         cache[source] = .some(same ? nil : Self.restoringMarkers(in: result, count: numbered.count))
         publish()
+    }
+
+    /// Gösterilecek kutular. Seçeneklerde yalnız "liste" görünümündeki kutular kalır.
+    private var shown: [[HUDTracker.Entry]] {
+        let clusters = Self.clusters(of: tracker.stable)
+        guard kind == .choices else { return clusters }
+        return clusters.filter { cluster in
+            Self.choiceCount.contains(cluster.count)
+                && cluster.allSatisfy { $0.lines <= 2 && $0.source.split(separator: " ").count <= Self.choiceWordLimit }
+        }
     }
 
     private func publish() {
         // Aynı kutuya ait yazılar (alt alta, bitişik) tek öğe olarak, kutunun EN ALT satırının altına konur.
         // Her parçanın çevirisi kendi altına konsaydı, bir sonraki özgün satırın üstünü kapatırdı.
         var items: [ScreenItem] = []
-        for cluster in Self.clusters(of: tracker.stable) {
+        for cluster in shown {
             var text = ""
             var icons: [String] = []
-            for entry in cluster {
+            var translated = 0
+            for (position, entry) in cluster.enumerated() {
                 guard let known = cache[entry.source], let translation = known else { continue }
                 if !text.isEmpty { text += "\n" }
+                // Seçenekler numaralanır: çeviri özgün satırın yanında değil altında durduğu için
+                // hangi çevirinin hangi seçeneğe ait olduğu sırasından anlaşılır.
+                if kind == .choices { text += "\(position + 1). " }
                 text += Self.shiftingMarkers(in: translation, by: icons.count)
                 icons += entry.icons
+                translated += 1
             }
             guard !text.isEmpty else { continue }
+            // Seçenek listesi yarım çevrilmiş görünmesin: hepsi hazır olunca gösterilir.
+            if kind == .choices, translated < cluster.count { continue }
             let left = cluster.map(\.x).min()!
             let right = cluster.map { $0.x + $0.width }.max()!
+            let top = cluster.map(\.top).min()!
             let bottom = cluster.map { $0.top + $0.height }.max()!
             let heights = cluster.map(\.lineHeight).sorted()
+            let lineHeight = heights[heights.count / 2]
             let lines = cluster.reduce(0) { $0 + $1.lines }
-            items.append(ScreenItem(x: left, y: min(bottom + Self.gap, 0.97), width: right - left, height: 0,
-                                    lineHeight: heights[heights.count / 2],
+            // Liste ekranın dibindeyse çeviri altına sığmaz; üstüne konur.
+            var y = min(bottom + Self.gap, 0.97)
+            if kind == .choices, bottom + Double(cluster.count) * lineHeight * 1.25 > 0.98 {
+                y = max(0.02, top - Self.gap - Double(cluster.count) * lineHeight * 1.25)
+            }
+            items.append(ScreenItem(x: left, y: y, width: right - left, height: 0,
+                                    lineHeight: lineHeight,
                                     // Birden çok parça varsa satır kırılabilmeli (her parça kendi satırında).
                                     lines: max(lines, cluster.count > 1 ? 2 : 1), text: text, icons: icons))
         }

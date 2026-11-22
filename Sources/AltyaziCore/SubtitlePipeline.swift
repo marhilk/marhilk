@@ -71,6 +71,15 @@ public actor SubtitlePipeline {
     }
     public func setRefine(_ refine: Refine?) { self.refine = refine }
     public func setRefineDeadline(_ seconds: TimeInterval) { refineDeadline = seconds }
+    /// Okuma süresi çarpanı: oyun bir repliği çabuk kaldırdığında çevirinin ekranda ne kadar bekleyeceğini
+    /// ölçekler (1 = olağan, 1.6 = yavaş okuyanlar için). Oyun yazıyı ekranda tuttukça çeviri zaten durur.
+    public func setReadingPace(_ factor: Double) {
+        let pace = max(0.5, min(3, factor))
+        let standard = SubtitleTracker()
+        tracker.minimumDisplayBase = standard.minimumDisplayBase * pace
+        tracker.minimumDisplayPerCharacter = standard.minimumDisplayPerCharacter * pace
+        tracker.minimumDisplayCap = standard.minimumDisplayCap * pace
+    }
     public func setDisplayHandler(_ handler: (@Sendable ([DisplayLine]) -> Void)?) { onDisplay = handler }
     public func setProblemHandler(_ handler: (@Sendable (String) -> Void)?) { onProblem = handler }
     public func setTimingHandler(_ handler: (@Sendable (Timing) -> Void)?) { onTiming = handler }

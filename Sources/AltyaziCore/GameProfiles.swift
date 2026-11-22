@@ -8,11 +8,14 @@ public struct GameProfile: Codable, Equatable, Sendable {
     /// Görev/ipucu yazılarının arandığı bölge.
     public var hudRegion: [Double]
     public var hudEnabled: Bool
+    /// Çevrilmeyecek adlar (karakter, yer, silah): çeviride olduğu gibi kalır. Eski kayıtlarda yoktur.
+    public var keptTerms: [String]?
 
-    public init(region: CGRect, hudRegion: CGRect, hudEnabled: Bool) {
+    public init(region: CGRect, hudRegion: CGRect, hudEnabled: Bool, keptTerms: [String] = []) {
         self.region = Self.numbers(region)
         self.hudRegion = Self.numbers(hudRegion)
         self.hudEnabled = hudEnabled
+        self.keptTerms = keptTerms
     }
 
     public var regionRect: CGRect? { Self.rect(region) }

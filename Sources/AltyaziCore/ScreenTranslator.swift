@@ -159,14 +159,119 @@ public final class ScreenTranslator: @unchecked Sendable {
             let source = members.map(\.text).joined(separator: " ")
             if SubtitleTracker.similarity(source, translation) >= 0.95 { return nil }
 
-            let left = members.map(\.x).min()!
-            let right = members.map { $0.x + $0.width }.max()!
-            let top = members.map { $0.y - $0.height / 2 }.min()!
-            let bottom = members.map { $0.y + $0.height / 2 }.max()!
-            let heights = members.map(\.height).sorted()
-            return ScreenItem(x: Double(left), y: Double(top), width: Double(right - left), height: Double(bottom - top),
-                              lineHeight: Double(heights[heights.count / 2]), lines: members.count, text: translation)
+            return ScreenItem(covering: members, text: translation)
         }
+    }
+}
+
+extension ScreenItem {
+    /// Bir grup özgün satırın kapladığı alana oturan çeviri öğesi.
+    init(covering members: [RecognizedLine], text: String) {
+        let left = members.map(\.x).min() ?? 0
+        let right = members.map { $0.x + $0.width }.max() ?? 0
+        let top = members.map { $0.y - $0.height / 2 }.min() ?? 0
+        let bottom = members.map { $0.y + $0.height / 2 }.max() ?? 0
+        let heights = members.map(\.height).sorted()
+        self.init(x: Double(left), y: Double(top), width: Double(right - left), height: Double(bottom - top),
+                  lineHeight: Double(heights.isEmpty ? 0 : heights[heights.count / 2]), lines: members.count, text: text)
+    }
+}
+
+/// "Ekranı çevir"in anahtarsız yolu: yazılar telefonda okunur ve cihaz üstü çeviriyle çevrilir.
+/// Hesap, ücret ve internet gerekmez. Menü girişleri sözlükten (`MenuGlossary`) gelir; paragraflar
+/// tek parça çevrilir. Yapay zekâ anahtarı girilmişse onun yerine bağlamı bilen yapay zekâ yolu kullanılır.
+public struct LocalScreenTranslator: Sendable {
+    /// Bir dizi İngilizce yazıyı çevirir; sonuç aynı sırada döner, çevrilemeyen `nil` olur.
+    public typealias Batch = @Sendable ([String]) async -> [String?]
+
+    private let translate: Batch
+
+    public init(translate: @escaping Batch) {
+        self.translate = translate
+    }
+
+    public func translate(frame: CVPixelBuffer) async throws -> [ScreenItem] {
+        let lines = try TextRecognizer().recognizeLines(pixelBuffer: frame, roi: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return await translate(lines: lines)
+    }
+
+    public func translate(lines all: [RecognizedLine]) async -> [ScreenItem] {
+        let lines = Array(all.filter { $0.text.filter(\.isLetter).count >= 2 }.prefix(150))
+        let blocks = Self.blocks(from: lines).filter { Self.isWorthTranslating($0.map(\.text).joined(separator: " ")) }
+        guard !blocks.isEmpty else { return [] }
+
+        // Sözlükte olanlar hemen; kalanlar tek seferde çevirmene.
+        var results = [String?](repeating: nil, count: blocks.count)
+        var queued: [(index: Int, caps: Bool)] = []
+        var requests: [String] = []
+        for (index, block) in blocks.enumerated() {
+            let source = block.map(\.text).joined(separator: " ")
+            if let known = MenuGlossary.lookup(source) {
+                results[index] = known
+            } else {
+                let caps = MenuGlossary.isAllCaps(source)
+                queued.append((index, caps))
+                requests.append(caps ? MenuGlossary.sentenceCased(source) : source)
+            }
+        }
+        if !requests.isEmpty {
+            let translated = await translate(requests)
+            for (offset, entry) in queued.enumerated() where offset < translated.count {
+                guard let text = translated[offset]?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { continue }
+                results[entry.index] = entry.caps ? text.uppercased(with: Locale(identifier: "tr")) : text
+            }
+        }
+
+        return blocks.enumerated().compactMap { index, block in
+            guard let text = results[index] else { return nil }
+            // Çeviri özgün yazıyla aynıysa (ad, marka) üstüne yazmanın anlamı yok.
+            let source = block.map(\.text).joined(separator: " ")
+            if SubtitleTracker.similarity(source, text) >= 0.95 { return nil }
+            return ScreenItem(covering: block, text: text)
+        }
+    }
+
+    /// Sayaç, tarih, tek harf gibi çevrilecek bir şey içermeyen yazıları eler.
+    static func isWorthTranslating(_ text: String) -> Bool {
+        let letters = text.filter(\.isLetter).count
+        let digits = text.filter(\.isNumber).count
+        return letters >= 2 && letters > digits
+    }
+
+    /// Okunan satırları yazı öbeklerine ayırır: aynı paragrafın satırları tek öbek olur, menü girişleri ve
+    /// etiketler ayrı ayrı kalır. Ekranda yan yana sütunlar olabildiği için bir satır, kendi sütununda
+    /// hemen üstünde duran öbeğe eklenir (yalnız bir önceki satıra bakılmaz).
+    static func blocks(from lines: [RecognizedLine]) -> [[RecognizedLine]] {
+        var result: [[RecognizedLine]] = []
+        for line in lines.sorted(by: { $0.y < $1.y }) {
+            if let index = result.indices.last(where: { continues(result[$0], with: line) }) {
+                result[index].append(line)
+            } else {
+                result.append([line])
+            }
+        }
+        return result
+    }
+
+    private static func continues(_ block: [RecognizedLine], with line: RecognizedLine) -> Bool {
+        guard let last = block.last, let first = line.text.first else { return false }
+        // Aynı sütun: sol kenarlar ya da ortalar hizalı.
+        let leftAligned = abs(line.x - last.x) < 0.015
+        let centered = abs((line.x + line.width / 2) - (last.x + last.width / 2)) < 0.015
+        guard leftAligned || centered else { return false }
+        // Hemen altında ve aynı boyda yazı.
+        let gap = (line.y - line.height / 2) - (last.y + last.height / 2)
+        let taller = max(last.height, line.height), shorter = min(last.height, line.height)
+        guard gap > -taller * 0.5, gap < taller * 0.9, shorter >= taller * 0.7 else { return false }
+
+        if first.isLowercase { return true }
+        // Büyük harfle başlayan satır: üstteki bitmemiş, uzun bir paragraf satırıysa devamıdır.
+        // Kısa girişler (menü, liste) alt alta dursa da ayrı ayrı çevrilir.
+        let lastFinished = last.text.last.map { ".!?:".contains($0) } ?? false
+        let lastWords = last.text.split(separator: " ").count
+        let widest = max(block.map(\.width).max() ?? 0, line.width)
+        return !lastFinished && lastWords >= 4 && last.width >= widest * 0.6
+            && MenuGlossary.lookup(last.text) == nil && MenuGlossary.lookup(line.text) == nil
     }
 }
 
@@ -177,11 +282,15 @@ public final class ScreenTranslationController: @unchecked Sendable {
     private let frame: () -> CVPixelBuffer?
     private let lock = NSLock()
     private var translator: ScreenTranslator?
+    private var local: LocalScreenTranslator?
     private var showing = false
     private var generation = 0
 
     /// Durum değişince çağrılır (telefon arayüzü için): "working", "done", "clear", "error".
     public var onState: (@Sendable (String, String?) -> Void)?
+    /// Çeviri bitince çevrilen öğeler ve çevrilen kareyle çağrılır (telefon ekranında göstermek için);
+    /// kaldırılınca boş liste gelir.
+    public var onItems: (@Sendable ([ScreenItem], CVPixelBuffer?) -> Void)?
 
     public init(server: SubtitleServer, frame: @escaping () -> CVPixelBuffer?) {
         self.server = server
@@ -191,6 +300,13 @@ public final class ScreenTranslationController: @unchecked Sendable {
     public func setTranslator(_ translator: ScreenTranslator?) {
         lock.lock()
         self.translator = translator
+        lock.unlock()
+    }
+
+    /// Anahtarsız (cihaz üstü) çevirmen; yapay zekâ anahtarı yokken bu kullanılır.
+    public func setLocalTranslator(_ translator: LocalScreenTranslator?) {
+        lock.lock()
+        local = translator
         lock.unlock()
     }
 
@@ -216,19 +332,21 @@ public final class ScreenTranslationController: @unchecked Sendable {
         generation += 1
         lock.unlock()
         server.sendScreen(state: "clear")
+        onItems?([], nil)
         onState?("clear", nil)
     }
 
     private func run() {
         lock.lock()
         let translator = self.translator
+        let local = self.local
         showing = true
         generation += 1
         let mine = generation
         lock.unlock()
 
-        guard let translator else {
-            return fail("Ekranı çevirmek için yapay zekâ anahtarı gerekli (telefondaki ayarlardan girilir).", mine)
+        guard translator != nil || local != nil else {
+            return fail("Çeviri henüz hazır değil; birkaç saniye sonra yeniden dene.", mine)
         }
         guard let frame = frame() else { return fail("PS5 görüntüsü henüz gelmedi.", mine) }
 
@@ -236,10 +354,17 @@ public final class ScreenTranslationController: @unchecked Sendable {
         onState?("working", nil)
         Task {
             do {
-                let items = try await translator.translate(frame: frame)
+                // Anahtar varsa bağlamı bilen yapay zekâ, yoksa cihaz üstü çeviri.
+                let items: [ScreenItem]
+                if let translator {
+                    items = try await translator.translate(frame: frame)
+                } else {
+                    items = try await local!.translate(frame: frame)
+                }
                 guard self.isCurrent(mine) else { return }
                 if items.isEmpty { return self.fail("Ekranda çevrilecek yazı bulunamadı.", mine) }
                 self.server.sendScreen(state: "done", items: items.map(\.json))
+                self.onItems?(items, frame)
                 self.onState?("done", nil)
             } catch {
                 self.fail(error.localizedDescription, mine)

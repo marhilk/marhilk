@@ -938,3 +938,147 @@ final class AppearanceTests: XCTestCase {
     }
 }
 
+
+final class TermProtectorTests: XCTestCase {
+    func testNamesSurviveTranslationAndCommonWordsAreLeftAlone() throws {
+        let protector = TermProtector(terms: ["Ghost", "Captain Price", "Price"])
+        let protected = protector.protect("Ghost, tell Captain Price the ghost is gone. Price is waiting.")
+        XCTAssertFalse(protected.text.contains("Ghost"))
+        XCTAssertFalse(protected.text.contains("Price"))
+        XCTAssertTrue(protected.text.contains("the ghost is gone"), "küçük harfli kelime ad değildir, çevrilir")
+        XCTAssertEqual(protected.replacements.map(\.term), ["Captain Price", "Ghost", "Price"], "uzun ad önce eşleşir")
+
+        // Çevirmen uydurma adları olduğu gibi bırakır (ek alsalar da).
+        let fake = protected.text.replacingOccurrences(of: ", tell", with: ", söyle")
+        XCTAssertEqual(protector.restore(fake, from: protected),
+                       "Ghost, söyle Captain Price the ghost is gone. Price is waiting.")
+        XCTAssertNil(protector.restore("Hayalet gitti.", from: protected), "uydurma ad kaybolduysa koruma geçersizdir")
+    }
+
+    func testPartOfAnotherWordIsNotAName() {
+        let protector = TermProtector(terms: ["Price"])
+        XCTAssertTrue(protector.protect("Priceless artifacts").isEmpty)
+        XCTAssertTrue(TermProtector(terms: [" ", "a"]).isEmpty, "boş ve tek harfli girişler yok sayılır")
+        XCTAssertFalse(protector.protect("Where is PRICE?").isEmpty, "tümü büyük yazılmış ad da korunur")
+    }
+
+    func testMenuEntriesComeFromTheGlossaryInTheSameCase() {
+        XCTAssertEqual(MenuGlossary.lookup("Resume"), "Devam Et")
+        XCTAssertEqual(MenuGlossary.lookup("RESUME"), "DEVAM ET")
+        XCTAssertEqual(MenuGlossary.lookup("INVENTORY"), "ENVANTER", "Türkçe büyük harf: i → İ değil, ı → I")
+        XCTAssertEqual(MenuGlossary.lookup("Skills:"), "Yetenekler")
+        XCTAssertNil(MenuGlossary.lookup("Resume the mission when ready"), "cümle içindeki kelimeye dokunulmaz")
+        XCTAssertEqual(MenuGlossary.sentenceCased("ACCEPT THE CONTRACT"), "Accept the contract")
+    }
+}
+
+final class LocalScreenTranslatorTests: XCTestCase {
+    private func line(_ text: String, y: CGFloat, x: CGFloat = 0.1, width: CGFloat = 0.2, height: CGFloat = 0.04) -> RecognizedLine {
+        RecognizedLine(parts: [text], y: y, height: height, x: x, width: width)
+    }
+
+    func testMenuEntriesStaySeparateAndParagraphsJoin() {
+        let menu = LocalScreenTranslator.blocks(from: [line("RESUME", y: 0.30), line("OPTIONS", y: 0.36), line("QUIT TO MAIN MENU", y: 0.42)])
+        XCTAssertEqual(menu.count, 3, "alt alta menü girişleri ayrı ayrı çevrilir")
+
+        let paragraph = LocalScreenTranslator.blocks(from: [
+            line("The old lighthouse keeper left this note", y: 0.30, width: 0.5),
+            line("for his daughter and his old friend", y: 0.345, width: 0.45),
+            line("Maria before he vanished into the storm.", y: 0.39, width: 0.5),   // büyük harfle başlar ama cümle sürüyor
+            line("Nobody has seen him since.", y: 0.435, width: 0.4),                // yeni cümle: ayrı çevrilir
+        ])
+        XCTAssertEqual(paragraph.map(\.count), [3, 1])
+
+        // Yan yana iki sütun: araya öbür sütunun satırı girse de her sütun kendi öbeğinde kalır.
+        let columns = LocalScreenTranslator.blocks(from: [
+            line("Increases the damage you deal", y: 0.30, x: 0.1, width: 0.3), line("Damage", y: 0.31, x: 0.6),
+            line("with heavy weapons.", y: 0.345, x: 0.1, width: 0.25),
+        ])
+        XCTAssertEqual(columns.map { $0.map(\.text).joined(separator: " ") }.sorted(),
+                       ["Damage", "Increases the damage you deal with heavy weapons."])
+    }
+
+    func testGlossaryIsUsedAndCapsAreKept() async {
+        let asked = Box<[String]>([])
+        let translator = LocalScreenTranslator { texts in
+            asked.value = texts
+            return texts.map { $0 == "Northgate" ? "Northgate" : "tr(\($0))" }
+        }
+        let items = await translator.translate(lines: [
+            line("RESUME", y: 0.30), line("ACCEPT THE CONTRACT", y: 0.40, width: 0.3),
+            line("Northgate", y: 0.50), line("12 / 40", y: 0.60),
+        ])
+        XCTAssertEqual(asked.value, ["Accept the contract", "Northgate"], "sözlükteki giriş çevirmene gitmez; büyük harfli yazı cümle düzeninde gider")
+        XCTAssertEqual(items.map(\.text), ["DEVAM ET", "TR(ACCEPT THE CONTRACT)"], "ad ve sayaç çevrilmez")
+        XCTAssertEqual(items[0].y, 0.28, accuracy: 0.001, "çeviri özgün yazının yerine oturur")
+    }
+}
+
+final class ChoiceTests: XCTestCase {
+    private let region = CGRect(x: 0, y: 0, width: 1, height: 1)
+    private func option(_ text: String, y: CGFloat, x: CGFloat = 0.3) -> RecognizedLine {
+        RecognizedLine(parts: [text], y: y, height: 0.04, x: x, width: 0.3)
+    }
+
+    func testListOfOptionsIsNumberedBelowTheList() async {
+        let sent = Box<[[ScreenItem]]>([])
+        let choices = HUDTranslator(kind: .choices) { sent.value.append($0) }
+        await choices.setTranslator { "tr(\($0))" }
+        let lines = [option("I'll take the money", y: 0.40), option("Who are you working for?", y: 0.45), option("Leave", y: 0.50)]
+        for _ in 0..<3 {
+            await choices.ingest(lines, region: region)
+            await choices.waitForTranslations()
+        }
+        await choices.ingest(lines, region: region)
+        let item = try? XCTUnwrap(sent.value.last?.first)
+        XCTAssertEqual(sent.value.last?.count, 1, "üç seçenek tek kutuda")
+        XCTAssertEqual(item?.text, "1. tr(I'll take the money)\n2. tr(Who are you working for?)\n3. tr(Leave)")
+        XCTAssertGreaterThan(item?.y ?? 0, 0.52, "çeviri listenin altında")
+    }
+
+    func testLoneTextAndLongMenusAreNotChoices() async {
+        let sent = Box<[[ScreenItem]]>([])
+        let choices = HUDTranslator(kind: .choices) { sent.value.append($0) }
+        await choices.setTranslator { "tr(\($0))" }
+        let menu = (0..<8).map { option("Menu entry \($0)", y: 0.2 + CGFloat($0) * 0.05) }
+        for lines in [[option("Press to open the door", y: 0.5)], menu] {
+            for _ in 0..<4 {
+                await choices.ingest(lines, region: region)
+                await choices.waitForTranslations()
+            }
+        }
+        XCTAssertTrue(sent.value.allSatisfy(\.isEmpty), "tek yazı ya da uzun menü seçenek listesi değildir")
+    }
+
+    func testListAtTheBottomGoesAboveAndOtherReadersAreasAreSkipped() async {
+        let sent = Box<[[ScreenItem]]>([])
+        let choices = HUDTranslator(kind: .choices) { sent.value.append($0) }
+        await choices.setTranslator { "tr(\($0))" }
+        let low = [option("Yes", y: 0.90), option("No", y: 0.95)]
+        for _ in 0..<4 {
+            await choices.ingest(low, region: region)
+            await choices.waitForTranslations()
+        }
+        XCTAssertLessThan(sent.value.last?.first?.y ?? 1, 0.86, "ekranın dibindeki listenin çevirisi üstüne konur")
+
+        let other = HUDTranslator(kind: .choices) { sent.value.append($0) }
+        await other.setTranslator { "tr(\($0))" }
+        sent.value = []
+        for _ in 0..<4 {
+            await other.ingest(low, region: region, excluding: [CGRect(x: 0.1, y: 0.8, width: 0.8, height: 0.2)])
+            await other.waitForTranslations()
+        }
+        XCTAssertTrue(sent.value.allSatisfy(\.isEmpty), "altyazı çerçevesinin içindeki yazıyı altyazı okuyucusu çevirir")
+    }
+}
+
+/// Testlerde kapanışlar arasında paylaşılan değer kutusu.
+final class Box<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value
+    init(_ value: Value) { stored = value }
+    var value: Value {
+        get { lock.lock(); defer { lock.unlock() }; return stored }
+        set { lock.lock(); stored = newValue; lock.unlock() }
+    }
+}

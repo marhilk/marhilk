@@ -295,6 +295,14 @@ case "cevir":
         fail(error.localizedDescription)
     }
 
+case "cihaz":
+    // Cihaz üstü (Apple) çeviriyi dener; anahtar gerekmez: altyazi-mac cihaz "<satır>" ["<satır>" …]
+    guard arguments.count >= 2 else { fail("Kullanım: altyazi-mac cihaz \"<satır>\" [\"<satır>\" …]") }
+    guard let translate = await makeTranslator() else { fail("Cihaz üstü çeviri kullanılamıyor.") }
+    for line in arguments.dropFirst() {
+        print("\(line)  =>  \(await translate(line) ?? "(çevrilemedi)")")
+    }
+
 case "ekran":
     // Kayıtlı bir oyun karesini "ekranı çevir" ile çevirir: altyazi-mac ekran <resim>
     // ALTYAZI_PORT verilirse sonucu o porttan TV önizlemesine de yollar (30 sn açık kalır).

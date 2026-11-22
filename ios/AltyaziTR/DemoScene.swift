@@ -40,14 +40,25 @@ final class DemoScene {
         ("Hold [1] to take cover behind the wall.", "Duvarın arkasına siper almak için [1] tuşunu basılı tut."),
         ("Hold to take cover behind the wall.", "Duvarın arkasına siper almak için tuşu basılı tut."),
         ("Follow Nova to the old tunnel.", "Nova'yı eski tünele kadar takip et."),
+        ("Open the gate", "Kapıyı aç"),
+        ("Wait for Nova", "Nova'yı bekle"),
     ]
+
+    /// Arada bir beliren konuşma seçenekleri (oyunun oyuncuya sorduğu seçim).
+    static let choices = ["Open the gate", "Wait for Nova", "Leave"]
 
     /// Okunan yazıya karşılık gelen hazır çeviri (okuma küçük farklarla gelebilir: harfler karşılaştırılır).
     static func translation(for text: String) -> String? {
         func letters(_ value: String) -> String { String(value.lowercased().filter { $0.isLetter || $0.isNumber }) }
         let wanted = letters(text)
         guard wanted.count >= 6 else { return nil }
-        return translations.first { letters($0.source) == wanted }?.turkish
+        if let known = translations.first(where: { letters($0.source) == wanted })?.turkish { return known }
+        // "Reyes: We need to…" gibi konuşan adıyla okunan satır ("ekranı çevir" tüm satırı okur).
+        if let colon = text.firstIndex(of: ":"), text.distance(from: text.startIndex, to: colon) <= 12 {
+            let rest = String(text[text.index(after: colon)...])
+            if let known = translation(for: rest) { return "\(text[..<colon]): \(known)" }
+        }
+        return nil
     }
 
     /// Her replik bu kadar saniye ekranda kalır, ardından kısa bir boşluk gelir.
@@ -78,6 +89,8 @@ final class DemoScene {
         // İpucu kutusu her iki replikte bir değişir ve arada bir kaybolur.
         let hintIndex = Int(time / (cycle * 2)) % (Self.hints.count + 1)
         if hintIndex < Self.hints.count { drawHint(Self.hints[hintIndex], in: context) }
+        // Seçim anı: üç replik boyunca görünür, üç replik boyunca kaybolur.
+        if Int(time / (cycle * 3)) % 2 == 1 { drawChoices(in: context) }
         return buffer
     }
 
@@ -92,7 +105,7 @@ final class DemoScene {
         }
         // Ay
         context.setFillColor(CGColor(red: 0.95, green: 0.92, blue: 0.8, alpha: 0.9))
-        context.fillEllipse(in: CGRect(x: w * 0.72, y: h * 0.66, width: 70, height: 70))
+        context.fillEllipse(in: CGRect(x: w * 0.47, y: h * 0.7, width: 70, height: 70))
         // Uzak ve yakın tepeler
         func hills(_ points: [CGPoint], _ color: CGColor) {
             context.beginPath()
@@ -160,6 +173,20 @@ final class DemoScene {
         if words.count > 1 {
             context.textPosition = CGPoint(x: x, y: baseline)
             CTLineDraw(CTLineCreateWithAttributedString(attributedString(words[1], size: 27, weight: "Helvetica")), context)
+        }
+    }
+
+    private func drawChoices(in context: CGContext) {
+        let w = CGFloat(Self.width), h = CGFloat(Self.height)
+        for (index, choice) in Self.choices.enumerated() {
+            let baseline = h * (1 - 0.285 - CGFloat(index) * 0.065)
+            let line = CTLineCreateWithAttributedString(attributedString(choice, size: 26, weight: "Helvetica"))
+            let bounds = CTLineGetBoundsWithOptions(line, .useOpticalBounds)
+            context.setFillColor(CGColor(red: 0.02, green: 0.03, blue: 0.06, alpha: 0.7))
+            context.fill(CGRect(x: w * 0.6 - 12, y: baseline - 9, width: bounds.width + 24, height: 38))
+            context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+            context.textPosition = CGPoint(x: w * 0.6, y: baseline)
+            CTLineDraw(line, context)
         }
     }
 
