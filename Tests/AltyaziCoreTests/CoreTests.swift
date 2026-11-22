@@ -259,6 +259,13 @@ final class ServerTests: XCTestCase {
         let clear = try await nextText(task)
         XCTAssertEqual(clear["type"] as? String, "lines")
         XCTAssertEqual((clear["lines"] as? [Any])?.count, 0)
+
+        // "İngilizcesini de göster": özgün satır ayrı alanda gider; istenmediğinde alan hiç yoktur.
+        server.send(lines: [SubtitleServer.Line(id: 3, speaker: nil, text: "Selam", original: "Hello"),
+                            SubtitleServer.Line(id: 4, speaker: nil, text: "Görüşürüz")])
+        let message = try await nextText(task)
+        let both = try XCTUnwrap(message["lines"] as? [[String: Any]])
+        XCTAssertEqual(both.map { $0["o"] as? String }, ["Hello", nil])
     }
 }
 
@@ -1069,6 +1076,32 @@ final class ChoiceTests: XCTestCase {
             await other.waitForTranslations()
         }
         XCTAssertTrue(sent.value.allSatisfy(\.isEmpty), "altyazı çerçevesinin içindeki yazıyı altyazı okuyucusu çevirir")
+    }
+}
+
+final class GamePackTests: XCTestCase {
+    func testPacksAreWellFormed() {
+        XCTAssertEqual(Set(GamePacks.all.map { $0.name.lowercased() }).count, GamePacks.all.count, "oyun adları tekil")
+        XCTAssertEqual(GamePacks.all.map(\.name), GamePacks.all.map(\.name).sorted(), "liste alfabetik")
+        for pack in GamePacks.all {
+            XCTAssertGreaterThanOrEqual(pack.terms.count, 8, pack.name)
+            XCTAssertEqual(Set(pack.terms.map { $0.lowercased() }).count, pack.terms.count, "\(pack.name): yinelenen ad")
+            for term in pack.terms {
+                XCTAssertGreaterThanOrEqual(term.count, 2, "\(pack.name): \(term)")
+                XCTAssertTrue(term.first?.isUppercase ?? false, "\(pack.name): \(term) büyük harfle başlamalı (yoksa hiç korunmaz)")
+            }
+        }
+        XCTAssertEqual(GamePacks.find(" call of duty: modern warfare ")?.terms.contains("Ghost"), true)
+        XCTAssertNil(GamePacks.find("Bilinmeyen Oyun"))
+    }
+
+    /// Paketteki adlar gerçekten korunur: çevirmene uydurma adla gider, geri konur.
+    func testPackNamesAreProtected() throws {
+        let pack = try XCTUnwrap(GamePacks.find("The Witcher 3"))
+        let protector = TermProtector(terms: pack.terms)
+        let protected = protector.protect("Geralt, take Roach and ride to Kaer Morhen.")
+        XCTAssertEqual(protected.replacements.count, 3)
+        XCTAssertEqual(protector.restore(protected.text, from: protected), "Geralt, take Roach and ride to Kaer Morhen.")
     }
 }
 

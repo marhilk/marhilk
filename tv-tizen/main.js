@@ -30,6 +30,9 @@
     var onWebOS = !onTV && /web0s|webos/i.test(window.navigator.userAgent);
     // Sayfayı telefon sunuyorsa (LG tarayıcısı) telefonun adresi zaten bellidir; ağ taranmaz.
     var servedByPhone = !onTV && /^http/.test(window.location.protocol) && !!window.location.hostname;
+    // İkinci ekran: sayfa telefondan bir tablet, bilgisayar ya da eski telefonun tarayıcısında açılmış.
+    // Arkada oyun görüntüsü yoktur; yazı siyah zeminde, uzaktan okunacak büyüklükte gösterilir.
+    var secondScreen = servedByPhone && !onWebOS && !/[?&]bg=/.test(window.location.search);
     var hdmiVideo = null;
     var subtitleEl = document.getElementById('subtitle');
     var screenEl = document.getElementById('screen');
@@ -87,7 +90,7 @@
 
     function applyStyle() {
         subtitleEl.className = style.position + (subtitleEl.firstChild ? ' visible' : '');
-        subtitleEl.style.fontSize = (BASE_FONT_VW * style.scale).toFixed(2) + 'vw';
+        subtitleEl.style.fontSize = ((secondScreen ? 3.1 : BASE_FONT_VW) * style.scale).toFixed(2) + 'vw';
         subtitleEl.style.color = style.color;
         subtitleEl.style.fontWeight = style.bold ? '700' : '500';
         var spans = subtitleEl.getElementsByTagName('span');
@@ -135,11 +138,18 @@
         recallTimer = setTimeout(function () { recallEl.className = ''; }, 8000);
     }
 
-    function fillRow(box, speaker, text) {
-        var signature = (speaker || '') + '\u0001' + text;
+    function fillRow(box, speaker, text, original) {
+        var signature = (speaker || '') + '\u0001' + text + '\u0001' + (original || '');
         if (box.getAttribute('data-sig') === signature) { return; }
         box.setAttribute('data-sig', signature);
         while (box.firstChild) { box.removeChild(box.firstChild); }
+        if (original) {
+            // İngilizcesini de göster: özgün satır, çevirinin üstünde küçük harfle.
+            var source = document.createElement('i');
+            source.className = 'orig';
+            source.textContent = original;
+            box.appendChild(source);
+        }
         if (speaker) {
             var who = document.createElement('b');
             who.textContent = speaker + ': ';
@@ -187,7 +197,7 @@
                     setTimeout(function () { if (element.className === 'row entering') { element.className = 'row'; } }, 30);
                 })(row);
             }
-            fillRow(row.firstChild, item.s ? String(item.s) : '', text);
+            fillRow(row.firstChild, item.s ? String(item.s) : '', text, item.o ? String(item.o) : '');
         }
         for (var existing in rows) {
             if (rows.hasOwnProperty(existing) && !keep[existing]) { removeRow(existing); }
@@ -214,15 +224,34 @@
 
     function showScreen(items) {
         clearScreen();
-        placeItems(screenEl, items, 0.82, 15);
+        if (secondScreen) { listItems(screenEl, items); } else { placeItems(screenEl, items, 0.82, 15); }
         screenShowing = items.length > 0;
     }
 
     /** Görev/ipucu yazıları: oyun sürerken köşede, özgün yazıların üstünde durur. */
     function showHud(items) {
         while (hudEl.firstChild) { hudEl.removeChild(hudEl.firstChild); }
+        if (secondScreen) { return listItems(hudEl, items); }
         // Özgün yazıdan biraz küçük: çeviri yardımcıdır, oyunun kendi yazısını bastırmasın.
         placeItems(hudEl, items, 0.78, 17);
+    }
+
+    /**
+     * İkinci ekranda (arkada oyun görüntüsü yokken) çeviriler oyundaki yerlerine konmaz; yukarıdan aşağıya,
+     * soldan sağa okuma sırasıyla alt alta listelenir.
+     */
+    function listItems(layer, items) {
+        var sorted = items.slice().sort(function (a, b) {
+            return ((a.y || 0) - (b.y || 0)) || ((a.x || 0) - (b.x || 0));
+        });
+        for (var i = 0; i < sorted.length; i++) {
+            var item = sorted[i] || {};
+            if (!item.t) { continue; }
+            var box = document.createElement('div');
+            box.className = 'item listed';
+            fillWithIcons(box, String(item.t), item.ic instanceof Array ? item.ic : []);
+            layer.appendChild(box);
+        }
     }
 
     /** Metni yazar; "[1]", "[2]"… işaretlerinin yerine oyundan kesilmiş tuş simgesinin resmini koyar. */
@@ -585,6 +614,10 @@
             document.body.className = 'webos';
             var remembered = parseInt(store('hdmi'), 10);
             showWebOSInput(remembered >= 1 && remembered <= 4 ? remembered : 1);
+            return;
+        }
+        if (secondScreen) {
+            document.body.className = 'second';
             return;
         }
         if (!onTV) {

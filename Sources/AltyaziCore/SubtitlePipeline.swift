@@ -71,6 +71,15 @@ public actor SubtitlePipeline {
     }
     public func setRefine(_ refine: Refine?) { self.refine = refine }
     public func setRefineDeadline(_ seconds: TimeInterval) { refineDeadline = seconds }
+    /// Çevirinin üstünde özgün (İngilizce) satır da gösterilsin mi (İngilizce öğrenenler için).
+    public func setShowsOriginal(_ on: Bool) {
+        guard on != showsOriginal else { return }
+        showsOriginal = on
+        lastSent = []   // ekrandaki satırlar yeni biçimle yeniden yollansın
+        publish()
+    }
+    private var showsOriginal = false
+
     /// Okuma süresi çarpanı: oyun bir repliği çabuk kaldırdığında çevirinin ekranda ne kadar bekleyeceğini
     /// ölçekler (1 = olağan, 1.6 = yavaş okuyanlar için). Oyun yazıyı ekranda tuttukça çeviri zaten durur.
     public func setReadingPace(_ factor: Double) {
@@ -241,8 +250,13 @@ public actor SubtitlePipeline {
         guard display != lastSent else { return }
         lastSent = display
         // Çevirisi henüz gelmemiş ya da "gösterme" denmiş satırlar TV'ye gitmez.
-        server.sendLines(display.compactMap { line in
-            line.translation.map { (id: line.id, speaker: line.speaker, text: $0) }
+        let withOriginal = showsOriginal
+        server.send(lines: display.compactMap { line in
+            line.translation.map {
+                // Duyurularda (sesten çeviri, uyarı) özgün satır yoktur ya da çevirinin kendisidir.
+                let original = withOriginal && !line.source.isEmpty && line.source != $0 ? line.source : nil
+                return SubtitleServer.Line(id: line.id, speaker: line.speaker, text: $0, original: original)
+            }
         })
         onDisplay?(display)
     }

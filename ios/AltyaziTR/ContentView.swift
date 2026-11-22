@@ -91,6 +91,9 @@ private struct WatchView: View {
                     VStack(spacing: 16) {
                         if model.demo { DemoBanner() }
                         StatusHero()
+                        if !model.tourHidden, model.tourDone.count < AppModel.TourItem.allCases.count {
+                            TourCard(openSettings: { showSettings = true })
+                        }
                         PreviewCard()
                         TranscriptCard()
                         QuickActions()
@@ -117,6 +120,7 @@ private struct WatchView: View {
                 .background(TouchObserver { model.noteInteraction() })
                 .sheet(isPresented: $showSettings) { SettingsSheet() }
                 .sheet(isPresented: $showPaywall) { PaywallView() }
+                .onChange(of: showSettings) { _, shown in if shown { model.completeTour(.appearance) } }
                 .onAppear { if model.locked { showPaywall = true } }
                 #if DEBUG
                 // Ekran görüntüsü almak için: `-debugPhone YES` telefon ekranı kipini, `-debugScreen YES`
@@ -437,6 +441,7 @@ private struct DeviceChip: View {
 private struct PreviewCard: View {
     @EnvironmentObject private var model: AppModel
     @State private var addingGame = false
+    @State private var pickingPack = false
     @State private var newGameName = ""
 
     var body: some View {
@@ -454,7 +459,8 @@ private struct PreviewCard: View {
                         }
                     }
                     Divider()
-                    Button { newGameName = ""; addingGame = true } label: { Label("Oyun ekle…", systemImage: "plus") }
+                    Button { pickingPack = true } label: { Label("Hazır oyunlardan seç…", systemImage: "list.star") }
+                    Button { newGameName = ""; addingGame = true } label: { Label("Başka bir oyun ekle…", systemImage: "plus") }
                     if !model.selectedGame.isEmpty {
                         Button(role: .destructive) { model.removeGame(model.selectedGame) } label: {
                             Label("“\(model.selectedGame)” ayarını sil", systemImage: "trash")
@@ -487,6 +493,7 @@ private struct PreviewCard: View {
             }
             .aspectRatio(16.0 / 9.0, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .sheet(isPresented: $pickingPack) { GamePackPicker() }
 
             HStack(spacing: 14) {
                 Legend(color: .yellow, text: "Konuşmalar")
@@ -574,6 +581,7 @@ private struct TranscriptCard: View {
         }
         .card()
         .sheet(isPresented: $showHistory) { HistorySheet() }
+        .onChange(of: showHistory) { _, shown in if shown { model.completeTour(.history) } }
     }
 }
 
@@ -765,6 +773,7 @@ private struct SettingsSheet: View {
                         Text("Uzun").tag(1.6)
                     }
                     Toggle("Konuşma seçeneklerini çevir", isOn: $model.choicesEnabled)
+                    Toggle("İngilizcesini de göster", isOn: $model.showOriginal)
                     NavigationLink {
                         KeptTermsView()
                     } label: {
@@ -777,7 +786,7 @@ private struct SettingsSheet: View {
                 } header: {
                     Text("Çeviri")
                 } footer: {
-                    Text("Kalma süresi: oyun bir repliği çabuk kaldırdığında çevirisi okunsun diye ekranda bekletilir; yavaş okuyorsan \"Uzun\" seç. Konuşma seçenekleri: oyun sana bir seçim sunduğunda seçeneklerin Türkçesi listenin altında numaralı görünür. Çevrilmeyecek adlar: karakter ve yer adları çeviride olduğu gibi kalır (\"Ghost\", \"Hayalet\" olmaz).")
+                    Text("Kalma süresi: oyun bir repliği çabuk kaldırdığında çevirisi okunsun diye ekranda bekletilir; yavaş okuyorsan \"Uzun\" seç. Konuşma seçenekleri: oyun sana bir seçim sunduğunda seçeneklerin Türkçesi listenin altında numaralı görünür. Çevrilmeyecek adlar: karakter ve yer adları çeviride olduğu gibi kalır (\"Ghost\", \"Hayalet\" olmaz). İngilizcesini de göster: özgün satır, Türkçesinin üstünde küçük harfle durur; oynarken İngilizce öğrenmek isteyenler için.")
                 }
 
                 Section {
@@ -835,6 +844,12 @@ private struct SettingsSheet: View {
                 }
 
                 Section {
+                    NavigationLink("Başka bir cihazı ekran yap") { SecondScreenView() }
+                } footer: {
+                    Text("Tablet, bilgisayar ya da eski bir telefon, tarayıcısından altyazıyı büyük yazıyla gösterebilir.")
+                }
+
+                Section {
                     HStack {
                         SecureField("Anthropic API anahtarı", text: $aiKey)
                             .textInputAutocapitalization(.never)
@@ -862,6 +877,16 @@ private struct SettingsSheet: View {
                     Button("PS5 eşleşmesini sil", role: .destructive) { confirmForget = true }
                 } footer: {
                     Text("Telefonun adresi: \(model.ipAddress)").monospacedDigit()
+                }
+
+                Section {
+                    ShareLink(item: model.diagnosticsReport) {
+                        Label("Sorun bildir", systemImage: "square.and.arrow.up")
+                    }
+                } header: {
+                    Text("Yardım")
+                } footer: {
+                    Text("Bir şey çalışmıyorsa uygulamanın o anki durumunu (PS5 ve televizyon bağlı mı, hangi adımda kaldın) kısa bir yazı olarak paylaşır. Adın, hesabın ve adresin bu yazıda yer almaz.")
                 }
 
                 Section {
@@ -1160,5 +1185,226 @@ enum TVSupport {
     /// Bu markalarda televizyona Marhilk kurulamıyor; çeviri telefonun ekranında gösterilir.
     static func phoneOnly(_ brand: String) -> Bool {
         brand == "android" || brand == "other"
+    }
+}
+
+// MARK: - Özellik turu
+
+/// İlk oyunda denenecekler. Madde, kullanıcı o özelliği gerçekten kullanınca kendiliğinden işaretlenir;
+/// maddeye dokunmak özelliği açar ya da nerede olduğunu gösterir.
+private struct TourCard: View {
+    @EnvironmentObject private var model: AppModel
+    let openSettings: () -> Void
+
+    private struct Entry {
+        let item: AppModel.TourItem
+        let title: String
+        let detail: String
+        let symbol: String
+    }
+
+    private let entries = [
+        Entry(item: .screen, title: "Bir menüyü çevir",
+              detail: "Oyunu duraklat, sonra buna dokun (ya da kumandada MAVİ tuş).", symbol: "text.viewfinder"),
+        Entry(item: .history, title: "Kaçırdığın repliği geri oku",
+              detail: "Buna dokun; geçmiş açılır. Televizyonda SARI tuş aynı işi görür.", symbol: "clock.arrow.circlepath"),
+        Entry(item: .names, title: "Adların çevrilmesini önle",
+              detail: "Oyununu listeden seç; karakter adları olduğu gibi kalsın.", symbol: "person.text.rectangle"),
+        Entry(item: .appearance, title: "Yazıyı kendine göre ayarla",
+              detail: "Boyut, renk, ekranda kalma süresi ayarlarda.", symbol: "textformat.size"),
+        Entry(item: .phone, title: "Çeviriyi telefonda gör",
+              detail: "Televizyon bağlı değilken de çalışır.", symbol: "iphone.landscape"),
+    ]
+
+    @State private var showHistory = false
+    @State private var pickingPack = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("İlk oyununda dene").font(.headline)
+                Spacer(minLength: 8)
+                Text("\(model.tourDone.count)/\(entries.count)").font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
+                Button {
+                    model.tourHidden = true
+                } label: {
+                    Image(systemName: "xmark").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                        .frame(width: 30, height: 30)
+                }
+                .accessibilityLabel("Turu kapat")
+            }
+            ForEach(entries, id: \.item) { entry in
+                let done = model.tourDone.contains(entry.item.rawValue)
+                Button {
+                    perform(entry.item)
+                } label: {
+                    HStack(alignment: .center, spacing: 12) {
+                        Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                            .font(.title3)
+                            .foregroundStyle(done ? Color.green : Color.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.title).font(.subheadline.weight(.semibold))
+                                .foregroundStyle(done ? Color.secondary : Color.primary)
+                                .strikethrough(done, color: .secondary)
+                            if !done {
+                                Text(entry.detail).font(.caption).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                        if !done { Image(systemName: entry.symbol).foregroundStyle(.yellow) }
+                    }
+                    .multilineTextAlignment(.leading)
+                    .padding(.vertical, 7)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .card()
+        .sheet(isPresented: $showHistory) { HistorySheet() }
+        .sheet(isPresented: $pickingPack) { GamePackPicker() }
+    }
+
+    private func perform(_ item: AppModel.TourItem) {
+        switch item {
+        case .screen: model.toggleScreenTranslation()
+        case .history:
+            showHistory = true
+            model.completeTour(.history)
+        case .names: pickingPack = true
+        case .appearance: openSettings()
+        case .phone: model.phoneDisplay = true
+        }
+    }
+}
+
+// MARK: - Hazır oyunlar
+
+/// Sık oynanan oyunların listesi: seçilen oyun eklenir ve karakter/yer adları "çevrilmeyecek adlar"a hazır gelir.
+private struct GamePackPicker: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var search = ""
+
+    private var packs: [GamePack] {
+        let query = search.trimmingCharacters(in: .whitespaces)
+        return query.isEmpty ? GamePacks.all : GamePacks.all.filter { $0.name.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(packs) { pack in
+                        Button {
+                            choose(pack)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(pack.name).foregroundStyle(.primary)
+                                    Text("\(pack.terms.count) ad: \(pack.terms.prefix(4).joined(separator: ", "))…")
+                                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Spacer(minLength: 8)
+                                if model.selectedGame == pack.name { Image(systemName: "checkmark").foregroundStyle(.yellow) }
+                            }
+                        }
+                    }
+                } footer: {
+                    Text("Oyunu seçince karakter ve yer adları çeviride olduğu gibi kalır. Oyunun listede yoksa ana ekrandaki oyun menüsünden \"Başka bir oyun ekle\"yi kullan; adları Ayarlar › Çevrilmeyecek adlar'dan kendin eklersin.")
+                }
+            }
+            .searchable(text: $search, prompt: "Oyun ara")
+            .navigationTitle("Oyununu seç")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Vazgeç") { dismiss() } }
+            }
+        }
+        .tint(.yellow)
+    }
+
+    private func choose(_ pack: GamePack) {
+        if model.games.contains(pack.name) {
+            // Oyun zaten ekli: seç ve eksik adları tamamla.
+            model.selectGame(pack.name)
+            model.addPackTerms(pack)
+        } else {
+            model.addGame(pack.name, pack: pack)
+            model.completeTour(.names)
+        }
+        dismiss()
+    }
+}
+
+// MARK: - İkinci ekran
+
+/// Başka bir cihazın (tablet, bilgisayar, eski telefon) tarayıcısını altyazı ekranı yapar:
+/// o cihaz aynı Wi-Fi ağındayken telefonun sunduğu sayfayı açar.
+private struct SecondScreenView: View {
+    @EnvironmentObject private var model: AppModel
+
+    private var address: String { "http://\(model.browserAddress)" }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                if let code = QRCode.image(for: address) {
+                    Image(uiImage: code)
+                        .interpolation(.none)
+                        .resizable()
+                        .frame(width: 200, height: 200)
+                        .padding(14)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .frame(maxWidth: .infinity)
+                        .accessibilityLabel("Adresin kare kodu")
+                }
+                VStack(spacing: 4) {
+                    Text("Tarayıcıya yazılacak adres").font(.caption).foregroundStyle(.secondary)
+                    Text(address).font(.title3.monospacedDigit().weight(.semibold)).textSelection(.enabled)
+                }
+                .frame(maxWidth: .infinity)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    step(1, "Öbür cihazı **aynı Wi-Fi ağına** bağla.")
+                    step(2, "Kamerasıyla yukarıdaki **kare kodu** okut ya da tarayıcısına adresi yaz.")
+                    step(3, "Cihazı **yatay** çevir, açılan siyah sayfayı tam ekran yap ve televizyonun yanına koy. Çeviri orada büyük yazıyla akar.")
+                    step(4, "O cihazın ekranı kendiliğinden kapanmasın: ayarlarından **otomatik kilidi kapat**.")
+                }
+
+                Label(model.tvCount > 0 ? "Bir ekran bağlı." : "Henüz bağlanan ekran yok.",
+                      systemImage: model.tvCount > 0 ? "checkmark.circle.fill" : "circle.dashed")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(model.tvCount > 0 ? Color.green : Color.secondary)
+
+                Text("Bu telefonda Marhilk açık kaldığı sürece çalışır. Adres, Wi-Fi ağın değişirse değişebilir; o zaman bu sayfadaki yeni adresi kullan.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(20)
+        }
+        .navigationTitle("Başka bir cihazı ekran yap")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func step(_ number: Int, _ text: LocalizedStringKey) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text("\(number)").font(.subheadline.weight(.bold)).foregroundStyle(.black)
+                .frame(width: 24, height: 24).background(Color.yellow, in: Circle())
+            Text(text).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// Bir metnin kare kodu (cihazda üretilir).
+enum QRCode {
+    static func image(for text: String) -> UIImage? {
+        guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        filter.setValue(Data(text.utf8), forKey: "inputMessage")
+        filter.setValue("M", forKey: "inputCorrectionLevel")
+        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 10, y: 10)),
+              let rendered = CIContext().createCGImage(output, from: output.extent) else { return nil }
+        return UIImage(cgImage: rendered)
     }
 }

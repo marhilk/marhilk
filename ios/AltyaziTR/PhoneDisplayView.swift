@@ -65,6 +65,14 @@ struct PhoneDisplayView: View {
                     .foregroundStyle(Color(white: 0.3))
             }
             ForEach(Array(lines)) { line in
+                if model.showOriginal, !line.source.isEmpty, line.source != line.translation {
+                    Text(line.source)
+                        .font(.system(size: 20 * model.fontScale))
+                        .foregroundStyle(Color(white: 0.6))
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.bottom, -6)
+                }
                 (Text(line.speaker.map { "\($0)  " } ?? "").foregroundColor(speakerColor(line.speaker))
                  + Text(line.translation ?? "").foregroundColor(Color(hex: model.appearance.color.rawValue)))
                     .font(.system(size: 34 * model.fontScale, weight: model.appearance.bold ? .bold : .semibold))

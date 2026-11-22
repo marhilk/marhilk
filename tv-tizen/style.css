@@ -14,6 +14,33 @@ body.preview {
     background: linear-gradient(160deg, #1d2a38, #0c1118);
 }
 
+/* İkinci ekran (tablet, bilgisayar, eski telefon): oyun görüntüsü yok; siyah zeminde büyük yazı. */
+body.second { background: #000; }
+body.second #subtitle { left: 4%; width: 92%; line-height: 1.3; }
+/* Tarayıcının alt çubuğu yazının üstüne binmesin. */
+body.second #subtitle.bottom { bottom: 10%; }
+body.second #help { display: none; }
+/* Görev yazıları, seçenekler ve "ekranı çevir"in sonucu: oyundaki yerlerinde değil, okunur bir liste hâlinde. */
+body.second #hud, body.second #screen {
+    left: 4%;
+    top: 4%;
+    width: 92%;
+    height: auto;
+}
+body.second #screen { background: #000; -webkit-column-count: 2; column-count: 2; -webkit-column-gap: 4%; column-gap: 4%; }
+body.second #hud .item.listed, body.second #screen .item.listed {
+    position: static;
+    display: block;
+    margin: 0 0 0.45em;
+    padding: 0;
+    background: none;
+    font-size: 2vw;
+    line-height: 1.3;
+    white-space: pre-line;
+    -webkit-column-break-inside: avoid;
+    break-inside: avoid;
+}
+
 /* LG (webOS) tarayıcısı: HDMI girişi tam ekran, her şeyin arkasında. */
 body.webos { background: #000; }
 
@@ -188,3 +215,13 @@ body.webos { background: #000; }
 }
 
 #notice.visible { display: block; }
+
+/* "İngilizcesini de göster": özgün satır, çevirinin üstünde küçük ve soluk. */
+#subtitle .orig {
+    display: block;
+    font-size: 0.66em;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 1.3;
+    opacity: 0.78;
+}

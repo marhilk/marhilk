@@ -139,6 +139,28 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Çevirinin üstünde özgün İngilizce satırı da göster (oynarken İngilizce öğrenmek isteyenler için).
+    @Published var showOriginal = false {
+        didSet {
+            defaults.set(showOriginal, forKey: "showOriginal")
+            let on = showOriginal
+            Task { await pipeline.setShowsOriginal(on) }
+        }
+    }
+
+    /// Özellik turu: kullanıcı bir özelliği gerçekten kullanınca o madde işaretlenir.
+    enum TourItem: String, CaseIterable {
+        case screen, history, names, appearance, phone
+    }
+    @Published private(set) var tourDone: Set<String> = []
+    @Published var tourHidden = false { didSet { defaults.set(tourHidden, forKey: "tourHidden") } }
+
+    func completeTour(_ item: TourItem) {
+        guard !tourDone.contains(item.rawValue) else { return }
+        tourDone.insert(item.rawValue)
+        defaults.set(Array(tourDone), forKey: "tourDone")
+    }
+
     /// Seçili oyunda çevrilmeyecek adlar (karakter, yer, silah).
     @Published private(set) var keptTerms: [String] = []
     private var protector = TermProtector(terms: [])
@@ -151,6 +173,17 @@ final class AppModel: ObservableObject {
         keptTerms.append(term)
         keptTerms.sort { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
         applyKeptTerms()
+        completeTour(.names)
+    }
+
+    /// Seçili oyunun hazır ad listesini (varsa) "çevrilmeyecek adlar"a ekler.
+    func addPackTerms(_ pack: GamePack) {
+        for term in pack.terms where !keptTerms.contains(where: { $0.caseInsensitiveCompare(term) == .orderedSame }) {
+            keptTerms.append(term)
+        }
+        keptTerms.sort { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        applyKeptTerms()
+        completeTour(.names)
     }
 
     func removeKeptTerm(_ term: String) {
@@ -166,7 +199,7 @@ final class AppModel: ObservableObject {
     /// Çeviriyi telefonun kendi ekranında büyük yazıyla göster (televizyona bir şey kurulamayan markalar için).
     @Published var phoneDisplay = false {
         didSet {
-            if phoneDisplay { setDimmed(false) }
+            if phoneDisplay { setDimmed(false); completeTour(.phone) }
             lastInteraction = Date()
         }
     }
@@ -348,6 +381,9 @@ final class AppModel: ObservableObject {
         choicesEnabled = defaults.object(forKey: "choicesEnabled") as? Bool ?? true
         let pace = defaults.double(forKey: "readingPace")
         readingPace = pace > 0 ? pace : 1
+        showOriginal = defaults.bool(forKey: "showOriginal")
+        tourDone = Set(defaults.stringArray(forKey: "tourDone") ?? [])
+        tourHidden = defaults.bool(forKey: "tourHidden")
         speechEnabled = defaults.bool(forKey: "speechEnabled")
         autoRegion = defaults.object(forKey: "autoRegion") as? Bool ?? true
         games = defaults.stringArray(forKey: "games") ?? []
@@ -436,6 +472,7 @@ final class AppModel: ObservableObject {
             }
             await pipeline.setQuickTranslator { text in await self?.quickTranslate(text) }
             if let pace = self?.readingPace { await pipeline.setReadingPace(pace) }
+            if self?.showOriginal == true { await pipeline.setShowsOriginal(true) }
             await self?.applyAIKey(KeychainStore.loadAIKey())
             for await lines in frames { await pipeline.ingest(lines) }
         }
@@ -505,6 +542,10 @@ final class AppModel: ObservableObject {
             if let term = text("/ad?t=") {
                 Task { @MainActor in self?.addKeptTerm(term) }
                 return ("text/plain; charset=utf-8", Data("eklendi\n".utf8))
+            }
+            if path == "/rapor" {
+                let report = DispatchQueue.main.sync { MainActor.assumeIsolated { self?.diagnosticsReport ?? "" } }
+                return ("text/plain; charset=utf-8", Data(report.utf8))
             }
             if path == "/ekran" {
                 Task { @MainActor in self?.toggleScreenTranslation() }
@@ -1072,7 +1113,9 @@ final class AppModel: ObservableObject {
         screen.onState = { [weak self] state, message in
             DispatchQueue.main.async {
                 switch state {
-                case "working", "done": self?.screenState = state
+                case "working", "done":
+                    self?.screenState = state
+                    if state == "done" { self?.completeTour(.screen) }
                 case "error": self?.screenState = message ?? "Ekran çevrilemedi."
                 default: self?.screenState = nil
                 }
@@ -1177,6 +1220,52 @@ final class AppModel: ObservableObject {
         region = suggestion
     }
 
+    // MARK: - Sorun bildir
+
+    /// Uygulamanın o anki durumunun kısa dökümü: bir şey çalışmadığında kullanıcı bunu paylaşır.
+    /// Kişisel bilgi içermez (ad, hesap, adres, PS5'in adı yoktur).
+    var diagnosticsReport: String {
+        let info = Bundle.main.infoDictionary
+        let version = "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
+        var system = utsname()
+        uname(&system)
+        let device = withUnsafeBytes(of: &system.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        let brand = defaults.string(forKey: "tvBrand") ?? ""
+        let guideStep = defaults.integer(forKey: "guideStep")
+
+        let ps5: String
+        switch connection {
+        case .connected: ps5 = "bağlı"
+        case .working(let step): ps5 = "bağlanıyor (\(step))"
+        case .failed(let message): ps5 = "BAĞLANAMADI: \(message)"
+        case .idle: ps5 = "bağlı değil"
+        }
+        var tv = tvCount > 0 ? "bağlı" : "bağlı değil"
+        if tvOutdated { tv += ", eski sürüm" }
+        var lines = [
+            "Marhilk durum raporu",
+            "Sürüm: \(version) · iOS \(UIDevice.current.systemVersion) · \(device)",
+            "Kurulum rehberi: \(defaults.bool(forKey: "guideDone") ? "tamamlandı" : "\(guideStep + 1). adımda")",
+            "Wi-Fi: \(LocalNetwork.wifiAddress() == nil ? "YOK" : "bağlı")",
+            "PS5 eşleşmesi: \(credentials == nil ? "YOK" : "var") · PSN girişi: \(accountID == nil ? "YOK" : "var")",
+            "PS5: \(ps5)",
+            "Televizyon markası: \(brand.isEmpty ? "seçilmedi" : brand) · \(tv)",
+        ]
+        if brand == "samsung" || brand.isEmpty {
+            let state = samsung.host == nil ? "ağda bulunamadı"
+                : "\(samsung.appInstalled ? "uygulama kurulu" : "uygulama kurulu değil"), geliştirici kipi \(samsung.developerMode ? "açık" : "KAPALI"), izinli adres \(samsung.developerIP == ipAddress ? "doğru" : "YANLIŞ")"
+            lines.append("Samsung TV: \(state) · sertifika \(hasSamsungCertificates ? "var" : "yok")")
+            if let samsungError { lines.append("Samsung hatası: \(samsungError)") }
+        }
+        lines.append("Çeviri dili: \(translationReady ? "hazır" : "HAZIR DEĞİL")\(translationStatus.map { " (\($0))" } ?? "")")
+        if let serverStatus { lines.append("Sunucu: \(serverStatus)") }
+        if locked { lines.append("Abonelik: gerekli (çeviri duruyor)") }
+        lines.append("Görüntü: \(session?.decodedFrames ?? 0) kare · son okuma \(String(format: "%.1f", reader.secondsSinceLastRead)) sn önce · \(history.count) replik çevrildi")
+        lines.append("Ayarlar: görev yazıları \(hudEnabled ? "açık" : "kapalı"), seçenekler \(choicesEnabled ? "açık" : "kapalı"), sesten çeviri \(speechEnabled ? "açık" : "kapalı"), otomatik çerçeve \(autoRegion ? (autoRegionFound ? "bulundu" : "aranıyor") : "kapalı"), telefon ekranı \(phoneDisplay ? "açık" : "kapalı"), kilitliyken çalış \(keepRunningWhenLocked ? "açık" : "kapalı")")
+        if demo { lines.append("Örnek kipi açık") }
+        return lines.joined(separator: "\n")
+    }
+
     // MARK: - Oyuna göre ayar
 
     /// Bir oyunu seçer (boş ad = "Genel"). O oyunun kayıtlı çerçeveleri yüklenir.
@@ -1201,10 +1290,12 @@ final class AppModel: ObservableObject {
         applyingProfile = false
     }
 
-    /// Yeni bir oyun ekler; şimdiki çerçeveler o oyunun başlangıç ayarı olur.
-    func addGame(_ rawName: String) {
+    /// Yeni bir oyun ekler; şimdiki çerçeveler o oyunun başlangıç ayarı olur. Oyun hazır paketlerdeyse
+    /// (ya da `pack` verildiyse) karakter ve yer adları "çevrilmeyecek adlar"a hazır gelir.
+    func addGame(_ rawName: String, pack: GamePack? = nil) {
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
+        let isNew = !games.contains(name)
         if !games.contains(name) {
             games.append(name)
             games.sort { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
@@ -1212,6 +1303,10 @@ final class AppModel: ObservableObject {
         }
         selectedGame = name
         defaults.set(name, forKey: "gameSelected")
+        if isNew {
+            keptTerms = (pack ?? GamePacks.find(name))?.terms.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending } ?? []
+            protector = TermProtector(terms: keptTerms)
+        }
         saveGameProfile()
     }
 

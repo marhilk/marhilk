@@ -117,6 +117,8 @@ struct SetupView: View {
         .background(Color.black.ignoresSafeArea())
         .safeAreaInset(edge: .bottom) { bottomBar }
         .onChange(of: step) { _, new in
+            // Sorun bildirilirken kullanıcının hangi adımda kaldığı görülsün.
+            UserDefaults.standard.set(new.rawValue, forKey: "guideStep")
             typing = false
             ticked = 0
             model.setupError = nil
@@ -178,15 +180,24 @@ struct SetupView: View {
     }
 
     private var bottomBar: some View {
-        Button(action: advance) {
-            Label(ticking ? "Bunu yaptım" : primaryLabel, systemImage: ticking ? "checkmark" : "arrow.right")
-                .font(.headline)
-                .frame(maxWidth: .infinity, minHeight: 50)
-                .foregroundStyle(ticking || canContinue ? Color.black : Color(.tertiaryLabel))
-                .background(ticking || canContinue ? Color.yellow : Color(.secondarySystemBackground),
-                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        VStack(spacing: 8) {
+            Button(action: advance) {
+                Label(ticking ? "Bunu yaptım" : primaryLabel, systemImage: ticking ? "checkmark" : "arrow.right")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .foregroundStyle(ticking || canContinue ? Color.black : Color(.tertiaryLabel))
+                    .background(ticking || canContinue ? Color.yellow : Color(.secondarySystemBackground),
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .disabled(!ticking && !canContinue)
+            if step != .welcome, step != .ready {
+                // Takılan kişi durumu tek dokunuşla paylaşır (WhatsApp, Mesajlar…); içinde kişisel bilgi yoktur.
+                ShareLink(item: model.diagnosticsReport) {
+                    Text("Takıldın mı? Durumu gönder").font(.footnote)
+                }
+                .foregroundStyle(.secondary)
+            }
         }
-        .disabled(!ticking && !canContinue)
         .padding(.horizontal, 20)
         .padding(.top, 10)
         .padding(.bottom, 6)

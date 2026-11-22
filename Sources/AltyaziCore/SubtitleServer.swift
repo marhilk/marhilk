@@ -47,7 +47,7 @@ public struct SubtitleAppearance: Equatable, Sendable {
 /// Protokol (JSON, metin çerçevesi):
 ///   {"type":"hello","app":"altyazitr","v":1}
 ///   {"type":"style","position":"top|bottom","scale":1.0}
-///   {"type":"lines","lines":[{"i":7,"s":"Konuşan","t":"Çeviri"}, …]}   (geliş sırasıyla; boş liste = temizle)
+///   {"type":"lines","lines":[{"i":7,"s":"Konuşan","t":"Çeviri","o":"Özgün satır (isteğe bağlı)"}, …]}   (geliş sırasıyla; boş liste = temizle)
 ///   {"type":"hud","items":[{"x","y","w","h","lh","n","t"}, …]}          (görev yazıları, yerinde; boş liste = temizle)
 public final class SubtitleServer: @unchecked Sendable {
     public static let defaultPort: UInt16 = 8765
@@ -118,9 +118,29 @@ public final class SubtitleServer: @unchecked Sendable {
     /// Ekranda gösterilecek satırlar, geliş sırasıyla (en yeni en sonda). Boş liste ekranı temizler.
     /// `id`, TV'nin aynı satırı tanıyıp yerinde tutmasını (yeniden çizmemesini) sağlar.
     public func sendLines(_ lines: [(id: Int, speaker: String?, text: String)]) {
+        send(lines: lines.map { Line(id: $0.id, speaker: $0.speaker, text: $0.text) })
+    }
+
+    /// Ekrana giden tek satır. `original` doluysa TV, çevirinin üstünde özgün (İngilizce) satırı da gösterir.
+    public struct Line: Equatable, Sendable {
+        public var id: Int
+        public var speaker: String?
+        public var text: String
+        public var original: String?
+
+        public init(id: Int, speaker: String?, text: String, original: String? = nil) {
+            self.id = id
+            self.speaker = speaker
+            self.text = text
+            self.original = original
+        }
+    }
+
+    public func send(lines: [Line]) {
         let payload: [[String: Any]] = lines.map { line in
             var item: [String: Any] = ["i": line.id, "t": line.text]
             if let speaker = line.speaker, !speaker.isEmpty { item["s"] = speaker }
+            if let original = line.original, !original.isEmpty { item["o"] = original }
             return item
         }
         broadcast(["type": "lines", "lines": payload], remember: \.lastSubtitle)
