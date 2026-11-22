@@ -1079,6 +1079,112 @@ final class ChoiceTests: XCTestCase {
     }
 }
 
+final class ReadingLoadTests: XCTestCase {
+    func testLoadFollowsHeat() {
+        XCTAssertEqual(ReadingLoad.level(thermal: .nominal, lowPower: false), .full)
+        XCTAssertEqual(ReadingLoad.level(thermal: .fair, lowPower: false), .eased)
+        XCTAssertEqual(ReadingLoad.level(thermal: .serious, lowPower: false), .light)
+        XCTAssertEqual(ReadingLoad.level(thermal: .critical, lowPower: false), .minimal)
+    }
+
+    func testLowPowerEasesButNeverStopsSideReading() {
+        XCTAssertEqual(ReadingLoad.level(thermal: .nominal, lowPower: true), .eased)
+        XCTAssertEqual(ReadingLoad.level(thermal: .fair, lowPower: true), .light)
+        // Düşük Güç Modu tek başına yan okumaları durdurmaz: durdurmak yalnız ısıyla olur.
+        XCTAssertEqual(ReadingLoad.level(thermal: .serious, lowPower: true), .light)
+        XCTAssertNotNil(ReadingLoad.level(thermal: .serious, lowPower: true).sideSlowdown)
+    }
+
+    func testSpeechReadingIsTouchedOnlyAtTheLastStep() {
+        for load in ReadingLoad.allCases where load != .minimal {
+            XCTAssertEqual(load.speechSlowdown, 1, "\(load) konuşma okumasını yavaşlatmamalı")
+            XCTAssertNotNil(load.sideSlowdown)
+        }
+        XCTAssertNil(ReadingLoad.minimal.sideSlowdown)
+        XCTAssertGreaterThan(ReadingLoad.minimal.speechSlowdown, 1)
+    }
+
+    private func makeBuffer() -> CVPixelBuffer {
+        var buffer: CVPixelBuffer?
+        CVPixelBufferCreate(kCFAllocatorDefault, 16, 16, kCVPixelFormatType_32BGRA, nil, &buffer)
+        return buffer!
+    }
+
+    /// Okuyucuya 0,6 saniye boyunca sürekli kare verir; kaç okuma yapıldığını döner.
+    private func reads(slowdown: Double?) -> Int {
+        let count = Box(0)
+        let reader = FrameTextReader(interval: 0.05) { _, _, _ in
+            count.value += 1
+            return []
+        }
+        reader.setSlowdown(slowdown)
+        let buffer = makeBuffer()
+        let end = Date().addingTimeInterval(0.6)
+        while Date() < end {
+            reader.submit(buffer)
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+        Thread.sleep(forTimeInterval: 0.05)
+        return count.value
+    }
+
+    func testSlowdownThinsReadsAndPauseStopsThem() {
+        let normal = reads(slowdown: 1)
+        let slowed = reads(slowdown: 3)
+        XCTAssertGreaterThanOrEqual(normal, 8)
+        XCTAssertLessThanOrEqual(slowed, normal / 2)
+        XCTAssertGreaterThanOrEqual(slowed, 2)
+        XCTAssertEqual(reads(slowdown: nil), 0)
+    }
+
+    func testPausedReaderStillKeepsTheLatestFrame() {
+        let reader = FrameTextReader(interval: 0.01) { _, _, _ in [] }
+        reader.setSlowdown(nil)
+        XCTAssertNil(reader.latestFrame)
+        reader.submit(makeBuffer())
+        XCTAssertNotNil(reader.latestFrame, "\"ekranı çevir\" duran okuyucudan da kare alabilmeli")
+    }
+
+    func testReaderResumesAfterPause() {
+        let count = Box(0)
+        let reader = FrameTextReader(interval: 0.01) { _, _, _ in
+            count.value += 1
+            return []
+        }
+        let buffer = makeBuffer()
+        reader.setSlowdown(nil)
+        reader.submit(buffer)
+        Thread.sleep(forTimeInterval: 0.05)
+        XCTAssertEqual(count.value, 0)
+        reader.setSlowdown(1)
+        reader.submit(buffer)
+        Thread.sleep(forTimeInterval: 0.1)
+        XCTAssertEqual(count.value, 1)
+    }
+}
+
+final class SubtitlePresetTests: XCTestCase {
+    func testPresetsAreDistinctAndWithinWhatTheTVAccepts() {
+        XCTAssertEqual(Set(SubtitlePreset.all.map(\.name)).count, SubtitlePreset.all.count)
+        for preset in SubtitlePreset.all {
+            XCTAssertTrue((0.6...1.8).contains(preset.scale), preset.name)       // ayarlardaki kaydırıcının aralığı
+            XCTAssertTrue((0...0.9).contains(preset.background), preset.name)
+        }
+    }
+
+    func testApplyingKeepsSpeakerColorsAndIsRecognisedAfterwards() {
+        let mine = SubtitleAppearance(color: .green, background: 0.3, bold: false, speakerColors: true)
+        for preset in SubtitlePreset.all {
+            let applied = preset.applied(to: mine)
+            XCTAssertTrue(applied.speakerColors)
+            XCTAssertTrue(preset.matches(applied, scale: preset.scale))
+            // Aynı anda yalnız bir hazır görünüm seçili görünür.
+            XCTAssertEqual(SubtitlePreset.all.filter { $0.matches(applied, scale: preset.scale) }.count, 1, preset.name)
+        }
+        XCTAssertFalse(SubtitlePreset.all.contains { $0.matches(mine, scale: 1) })
+    }
+}
+
 final class GamePackTests: XCTestCase {
     func testPacksAreWellFormed() {
         XCTAssertEqual(Set(GamePacks.all.map { $0.name.lowercased() }).count, GamePacks.all.count, "oyun adları tekil")

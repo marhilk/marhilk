@@ -208,6 +208,31 @@
         applyStyle();
     }
 
+    // ---------- Gizle / göster ----------
+
+    /**
+     * YEŞİL tuş (ya da telefondaki düğme): altyazıyı ve köşe yazılarını gizler; bir ara sahneyi yazısız
+     * izlemek için. Çeviri arkada sürer, geri açınca kaldığı yerden görünür. Kalıcı değildir: uygulama
+     * yeniden açılınca yazı yine görünür (gizli unutulup "bozuldu" sanılmasın).
+     */
+    var muted = false;
+
+    function reportVisibility() {
+        if (socket && socket.readyState === 1) {
+            try { socket.send(JSON.stringify({ type: 'visibility', hidden: muted })); } catch (e) { /* bağlantı koptuysa yeniden bağlanınca bildirilir */ }
+        }
+    }
+
+    function setMuted(on) {
+        on = !!on;
+        if (on !== muted) {
+            muted = on;
+            document.documentElement.className = muted ? 'muted' : '';
+            showNotice(muted ? 'Altyazı gizlendi · YEŞİL tuşla geri gelir' : 'Altyazı açık', muted ? 3500 : 1500);
+        }
+        reportVisibility();
+    }
+
     // ---------- "Ekranı çevir" ----------
 
     function showNotice(text, forMs) {
@@ -336,6 +361,10 @@
             heartbeat = true;
         } else if (message.type === 'screen') {
             onScreenMessage(message);
+        } else if (message.type === 'mute') {
+            setMuted(message.on === true);
+        } else if (message.type === 'notice') {
+            if (typeof message.text === 'string') { showNotice(message.text.slice(0, 200), Math.min(15000, Math.max(1000, message.ms || 5000))); }
         } else if (message.type === 'hud') {
             showHud(message.items instanceof Array ? message.items : []);
         } else if (message.type === 'lines') {
@@ -427,6 +456,7 @@
             ws.send(JSON.stringify({ type: 'hello', build: TV_BUILD, platform: onTV ? 'tizen' : (onWebOS ? 'webos' : 'browser') }));
         } catch (e) { /* bağlantı o an koptuysa yoklama yeniden kurar */ }
         showHud([]);   // önceki bağlantıdan kalan köşe yazısı ekranda takılı kalmasın
+        if (muted) { reportVisibility(); }   // telefon yeniden açıldıysa yazının gizli olduğunu bilsin
         failuresOnSavedHost = 0;
         store('host', host);
         setStatus('Telefona bağlandı (' + host + ')');
@@ -674,6 +704,7 @@
             try { window.tizen.tvinputdevice.registerKey('ColorF0Red'); } catch (e) { /* tuş yoksa HDMI değiştirme kapalı kalır */ }
             try { window.tizen.tvinputdevice.registerKey('ColorF3Blue'); } catch (e) { /* tuş yoksa ekran çevirisi telefondan başlatılır */ }
             try { window.tizen.tvinputdevice.registerKey('ColorF2Yellow'); } catch (e) { /* tuş yoksa geçmiş telefondan okunur */ }
+            try { window.tizen.tvinputdevice.registerKey('ColorF1Green'); } catch (e) { /* tuş yoksa altyazı telefondan gizlenir */ }
             try {
                 window.webapis.appcommon.setScreenSaver(window.webapis.appcommon.AppCommonScreenSaverState.SCREEN_SAVER_OFF);
             } catch (e) { /* ekran koruyucu ayarı desteklenmiyorsa önemli değil */ }
@@ -695,6 +726,10 @@
             case 403:                                      // KIRMIZI
                 if (onTV) { selectHdmi(hdmiIndex + 1); }
                 if (onWebOS) { showWebOSInput((hdmiIndex + 1) % 4 + 1); }
+                return;
+            case 404:                                      // YEŞİL: altyazıyı gizle / göster
+            case 71:                                       // (bilgisayar önizlemesinde "G" tuşu)
+                setMuted(!muted);
                 return;
             case 405:                                      // SARI: son replikleri yeniden göster
             case 89:                                       // (bilgisayar önizlemesinde "Y" tuşu)

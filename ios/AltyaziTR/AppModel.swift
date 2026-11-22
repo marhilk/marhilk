@@ -196,6 +196,86 @@ final class AppModel: ObservableObject {
         saveGameProfile()
     }
 
+    // MARK: Isınma koruması
+
+    /// Telefonun ısısına göre ekran okuma yükü. Isındıkça önce yan okumalar (görev yazıları, seçenekler,
+    /// altyazının yerini arama) seyrelir; konuşma okuması yalnız son kademede yavaşlar.
+    @Published private(set) var readingLoad: ReadingLoad = .full
+    /// Telefonun bildirdiği ısı durumu (ayarlar ve durum raporu için).
+    @Published private(set) var thermalState: ProcessInfo.ThermalState = .nominal
+    #if DEBUG
+    /// Deneme: ısı durumunu elle ver (`-debugThermal 0…3` ya da `:8080/isi?d=0…3`; -1 gerçeğe döner).
+    private var thermalOverride: ProcessInfo.ThermalState?
+    #endif
+
+    private func watchThermalState() {
+        for name in [ProcessInfo.thermalStateDidChangeNotification, Notification.Name.NSProcessInfoPowerStateDidChange] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.applyReadingLoad() }
+            }
+        }
+        applyReadingLoad()
+    }
+
+    private func applyReadingLoad() {
+        let info = ProcessInfo.processInfo
+        var thermal = info.thermalState
+        #if DEBUG
+        if let thermalOverride { thermal = thermalOverride }
+        #endif
+        thermalState = thermal
+        let load = ReadingLoad.level(thermal: thermal, lowPower: info.isLowPowerModeEnabled)
+        reader.setSlowdown(load.speechSlowdown)
+        for side in [hudReader, choiceReader, scanReader] { side.setSlowdown(load.sideSlowdown) }
+        guard load != readingLoad else { return }
+        let previous = readingLoad
+        readingLoad = load
+        if load == .minimal {
+            // Yan okumalar durdu: ekranda kalan görev yazısı ve seçenekler takılı kalmasın.
+            Task { await hud.reset(); await choices.reset() }
+            if connection == .connected {
+                server.sendNotice("Telefon çok ısındı: görev yazıları ve seçenekler bir süre çevrilmeyecek. Konuşma çevirisi sürüyor.", seconds: 7)
+            }
+        } else if previous == .minimal, connection == .connected {
+            server.sendNotice("Telefon soğudu: görev yazıları ve seçenekler yeniden çevriliyor.", seconds: 4)
+        }
+    }
+
+    /// Isınma korumasının kullanıcıya gösterilecek açıklaması; koruma devrede değilse `nil`.
+    var thermalNote: String? {
+        switch readingLoad {
+        case .full, .eased: return nil
+        case .light: return "Telefonu serin tutmak için görev yazıları ve seçenekler daha seyrek okunuyor. Konuşma çevirisi etkilenmez."
+        case .minimal: return "Telefon çok ısındı: görev yazıları ve seçenekler durduruldu, konuşma çevirisi sürüyor. Şarjdaysa çıkar, kılıfını çıkar, serin bir yere koy."
+        }
+    }
+
+    /// Isı durumunun kısa adı.
+    var thermalName: String {
+        switch thermalState {
+        case .nominal: return "Serin"
+        case .fair: return "Ilık"
+        case .serious: return "Sıcak"
+        case .critical: return "Çok sıcak"
+        @unknown default: return "Bilinmiyor"
+        }
+    }
+
+    // MARK: Televizyonda gizle / göster
+
+    /// Televizyondaki altyazı gizli mi (kumandada YEŞİL tuş ya da buradaki düğme)? Televizyon bildirir.
+    @Published private(set) var tvMuted = false
+
+    func setTVMuted(_ hidden: Bool) {
+        server.sendMute(hidden)
+    }
+
+    /// Hazır bir görünümü uygular (yazının yeri ve konuşan renkleri olduğu gibi kalır).
+    func apply(_ preset: SubtitlePreset) {
+        fontScale = preset.scale
+        appearance = preset.applied(to: appearance)
+    }
+
     /// Çeviriyi telefonun kendi ekranında büyük yazıyla göster (televizyona bir şey kurulamayan markalar için).
     @Published var phoneDisplay = false {
         didSet {
@@ -434,7 +514,7 @@ final class AppModel: ObservableObject {
         server.onClientCountChange = { [weak self] count in
             self?.tvCount = count
             if count > 0 { self?.tvLaunchStatus = nil }
-            if count == 0 { self?.tvOutdated = false }
+            if count == 0 { self?.tvOutdated = false; self?.tvMuted = false }
         }
         server.onStatus = { [weak self] status in self?.serverStatus = status }
         // TV kumandasından gelen komutlar (mavi tuş: ekranı çevir).
@@ -444,6 +524,10 @@ final class AppModel: ObservableObject {
                 if message["platform"] as? String == "tizen", let build = message["build"] as? String {
                     self?.tvOutdated = build != SamsungTVSetup.embeddedBuild
                 }
+                return
+            }
+            if message["type"] as? String == "visibility" {
+                self?.tvMuted = message["hidden"] as? Bool ?? false
                 return
             }
             self?.screen.handle(message: message)
@@ -543,6 +627,17 @@ final class AppModel: ObservableObject {
                 Task { @MainActor in self?.addKeptTerm(term) }
                 return ("text/plain; charset=utf-8", Data("eklendi\n".utf8))
             }
+            if let degree = text("/isi?d=") {
+                Task { @MainActor in
+                    self?.thermalOverride = Int(degree).flatMap { ProcessInfo.ThermalState(rawValue: $0) }
+                    self?.applyReadingLoad()
+                }
+                return ("text/plain; charset=utf-8", Data("ayarlandı\n".utf8))
+            }
+            if let hidden = text("/gizle?d=") {
+                Task { @MainActor in self?.setTVMuted(hidden == "1") }
+                return ("text/plain; charset=utf-8", Data("istendi\n".utf8))
+            }
             if path == "/rapor" {
                 let report = DispatchQueue.main.sync { MainActor.assumeIsolated { self?.diagnosticsReport ?? "" } }
                 return ("text/plain; charset=utf-8", Data(report.utf8))
@@ -574,6 +669,11 @@ final class AppModel: ObservableObject {
             VTCreateCGImageFromCVPixelBuffer(buffer, options: nil, imageOut: &image)
             DispatchQueue.main.async { self?.preview = image }
         }
+        #if DEBUG
+        let forced = defaults.object(forKey: "debugThermal") as? Int ?? Int(defaults.string(forKey: "debugThermal") ?? "") ?? -1
+        thermalOverride = ProcessInfo.ThermalState(rawValue: forced)
+        #endif
+        watchThermalState()
     }
 
     /// Mac'te yapılmış PS5 eşleşmesi ve yapay zekâ anahtarı, uygulamanın Belgeler klasörüne
@@ -609,6 +709,8 @@ final class AppModel: ObservableObject {
     /// Uygulama öne her geldiğinde çağrılır.
     func activate() {
         UIApplication.shared.isIdleTimerDisabled = true
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        applyReadingLoad()
         ipAddress = LocalNetwork.wifiAddress() ?? "Wi-Fi yok"
         #if DEBUG
         if UserDefaults.standard.bool(forKey: "debugSamsungInstall") { checkSamsungTV() }
@@ -706,6 +808,14 @@ final class AppModel: ObservableObject {
                     "seçenek": self.choicesEnabled ? self.choiceItems.map(\.text).joined(separator: " | ") : "kapalı",
                     "seçenekOkuma": (self.choiceReader.lastReadDuration * 1000).rounded(),
                     "telefonEkranı": self.phoneDisplay,
+                    "ısı": self.thermalName,
+                    "yük": "\(self.readingLoad)",
+                    "düşükGüç": ProcessInfo.processInfo.isLowPowerModeEnabled,
+                    "pil": UIDevice.current.batteryLevel < 0 ? -1 : Int(UIDevice.current.batteryLevel * 100),
+                    "şarjda": UIDevice.current.batteryState == .charging || UIDevice.current.batteryState == .full,
+                    "okuma": (self.reader.lastReadDuration * 1000).rounded(),
+                    "görevOkuma": (self.hudReader.lastReadDuration * 1000).rounded(),
+                    "tvGizli": self.tvMuted,
                     "adlar": self.keptTerms.count,
                     "görevBölge": [self.hudRegion.minX, self.hudRegion.minY, self.hudRegion.width, self.hudRegion.height].map { (Double($0) * 100).rounded() / 100 },
                     "görevOkunan": self.hudRaw,
@@ -1262,6 +1372,8 @@ final class AppModel: ObservableObject {
         if locked { lines.append("Abonelik: gerekli (çeviri duruyor)") }
         lines.append("Görüntü: \(session?.decodedFrames ?? 0) kare · son okuma \(String(format: "%.1f", reader.secondsSinceLastRead)) sn önce · \(history.count) replik çevrildi")
         lines.append("Ayarlar: görev yazıları \(hudEnabled ? "açık" : "kapalı"), seçenekler \(choicesEnabled ? "açık" : "kapalı"), sesten çeviri \(speechEnabled ? "açık" : "kapalı"), otomatik çerçeve \(autoRegion ? (autoRegionFound ? "bulundu" : "aranıyor") : "kapalı"), telefon ekranı \(phoneDisplay ? "açık" : "kapalı"), kilitliyken çalış \(keepRunningWhenLocked ? "açık" : "kapalı")")
+        lines.append("Isı: \(thermalName)\(ProcessInfo.processInfo.isLowPowerModeEnabled ? " · Düşük Güç Modu açık" : "")\(readingLoad >= .light ? " · ısınma koruması devrede" : "")")
+        if tvMuted { lines.append("Televizyonda altyazı gizli (YEŞİL tuş)") }
         if demo { lines.append("Örnek kipi açık") }
         return lines.joined(separator: "\n")
     }

@@ -238,11 +238,17 @@ private struct StatusHero: View {
                     DeviceChip(symbol: "iphone.landscape", name: "Telefon", state: "Ekran hazır", color: .green)
                 } else {
                     DeviceChip(symbol: "tv", name: "Televizyon",
-                               state: model.tvCount > 0 ? "Bağlı" : "Bekleniyor",
-                               color: model.tvCount > 0 ? .green : .orange)
+                               state: model.tvCount > 0 ? (model.tvMuted ? "Altyazı gizli" : "Bağlı") : "Bekleniyor",
+                               color: model.tvCount > 0 && !model.tvMuted ? .green : .orange)
                 }
             }
             actions
+            if let note = model.thermalNote {
+                Label(note, systemImage: model.readingLoad == .minimal ? "thermometer.high" : "thermometer.medium")
+                    .font(.footnote)
+                    .foregroundStyle(model.readingLoad == .minimal ? Color.red : Color.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             // Örnek kipinde çeviri dili eksik olsa da sahnenin hazır çevirisi gösterilir; uyarıya gerek yok.
             if let problem = model.serverStatus ?? (model.demo ? nil : model.translationStatus) {
                 Label(problem, systemImage: "exclamationmark.triangle.fill")
@@ -662,6 +668,15 @@ private struct QuickActions: View {
                        highlighted: false, compact: true) {
                 model.phoneDisplay = true
             }
+            if model.tvCount > 0 {
+                ActionTile(symbol: model.tvMuted ? "eye.fill" : "eye.slash.fill",
+                           title: model.tvMuted ? "Televizyonda altyazıyı göster" : "Televizyonda altyazıyı gizle",
+                           detail: model.tvMuted ? "Altyazı şu an gizli; çeviri arkada sürüyor."
+                                                 : "Bir sahneyi yazısız izlemek için. Kumandada YEŞİL tuş da aynı işi yapar.",
+                           highlighted: model.tvMuted, compact: true) {
+                    model.setTVMuted(!model.tvMuted)
+                }
+            }
             Text("Ekranı çevir: oyunu duraklat, sonra bas (ya da TV kumandasında MAVİ tuş). Menü, görev ve belgeler yerinde Türkçe görünür.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -744,6 +759,8 @@ private struct SettingsSheet: View {
                 Section {
                     SubtitleSample(appearance: model.appearance, scale: model.fontScale)
                         .listRowInsets(EdgeInsets())
+                    PresetRow()
+                        .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0))
                     Picker("Yazı rengi", selection: $model.appearance.color) {
                         Text("Beyaz").tag(SubtitleAppearance.TextColor.white)
                         Text("Sarı").tag(SubtitleAppearance.TextColor.yellow)
@@ -763,7 +780,7 @@ private struct SettingsSheet: View {
                 } header: {
                     Text("Görünüm")
                 } footer: {
-                    Text("Değişiklikler televizyonda anında görünür. Konuşanları renklendirince her kişi kendi rengini alır; kalabalık sahnelerde kimin konuştuğu daha kolay izlenir.")
+                    Text("Hazır görünümlerden biri tek dokunuşla uygulanır; sonra aşağıdan ince ayar yapabilirsin. Değişiklikler televizyonda anında görünür. Konuşanları renklendirince her kişi kendi rengini alır; kalabalık sahnelerde kimin konuştuğu daha kolay izlenir.")
                 }
 
                 Section {
@@ -790,6 +807,10 @@ private struct SettingsSheet: View {
                 }
 
                 Section {
+                    LabeledContent("Telefonun ısısı") {
+                        Text(model.readingLoad >= .light ? "\(model.thermalName) · koruma devrede" : model.thermalName)
+                            .foregroundStyle(model.readingLoad == .minimal ? Color.red : (model.readingLoad == .light ? Color.orange : Color.secondary))
+                    }
                     Toggle("Kilitliyken çeviriyi sürdür", isOn: $model.keepRunningWhenLocked)
                     Toggle("Altyazı yokken sesten çevir (deneysel)", isOn: $model.speechEnabled)
                     Toggle("Oyun sesini telefondan çal", isOn: $model.gameAudioEnabled)
@@ -805,6 +826,7 @@ private struct SettingsSheet: View {
                     Text("Çalışma")
                 } footer: {
                     VStack(alignment: .leading, spacing: 6) {
+                        Text("Isınma koruması: telefon ısınınca görev yazıları ve seçenekler kendiliğinden daha seyrek okunur, soğuyunca eski hızına döner; konuşma çevirisi bundan etkilenmez. Telefonu oynarken şarja takmamak ve kılıfından çıkarmak en çok işe yarayan iki şeydir.")
                         Text("Ekranda altyazı varken çeviri altyazıdan yapılır. Altyazı olmayan yerlerde (ara sahneler, altyazısız oyunlar) oyundaki İngilizce konuşma telefonda dinlenip çevrilir. Müzik ve efekt sesleri arasında her repliği yakalayamayabilir.")
                         if model.gameAudioEnabled {
                             Text("PS5'in sesi telefondan ya da bağlı kulaklıktan gelir.")
@@ -914,6 +936,45 @@ private struct SettingsSheet: View {
 }
 
 /// Abonelik ekranını açar (ana ekranın herhangi bir yerinden).
+/// Hazır görünümler: her biri kendi biçimiyle yazılmış küçük bir örnek; dokununca uygulanır.
+private struct PresetRow: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(SubtitlePreset.all) { preset in
+                    let selected = preset.matches(model.appearance, scale: model.fontScale)
+                    Button {
+                        model.apply(preset)
+                    } label: {
+                        VStack(spacing: 6) {
+                            Text("Aa")
+                                .font(.system(size: 15 * preset.scale, weight: preset.bold ? .bold : .medium))
+                                .foregroundStyle(Color(hex: preset.color.rawValue))
+                                .shadow(color: .black, radius: preset.background < 0.25 ? 2 : 0)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(Color.black.opacity(preset.background), in: RoundedRectangle(cornerRadius: 3))
+                                .frame(width: 104, height: 44)
+                                .background(Color(red: 0.36, green: 0.42, blue: 0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .strokeBorder(selected ? Color.yellow : Color.clear, lineWidth: 2.5))
+                            Text(preset.name)
+                                .font(.caption.weight(selected ? .semibold : .regular))
+                                .foregroundStyle(selected ? Color.primary : Color.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(preset.name) görünümü")
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+}
+
 private struct OpenPaywallKey: EnvironmentKey {
     static let defaultValue: () -> Void = {}
 }

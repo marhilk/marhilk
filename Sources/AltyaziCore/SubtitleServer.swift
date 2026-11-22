@@ -169,6 +169,22 @@ public final class SubtitleServer: @unchecked Sendable {
         queue.async { [self] in clients.values.forEach { send(data, to: $0) } }
     }
 
+    /// Televizyonun ortasında kısa süre duran bilgi yazısı (ör. ısınma uyarısı). Dökümde ve geçmişte yer almaz.
+    public func sendNotice(_ text: String, seconds: Double = 5) {
+        sendTransient(["type": "notice", "text": text, "ms": Int(seconds * 1000)])
+    }
+
+    /// Televizyondaki altyazıyı ve köşe yazılarını gizler ya da geri getirir (kumandadaki YEŞİL tuşun karşılığı).
+    /// Televizyon yeni durumunu `{"type":"visibility","hidden":…}` iletisiyle bildirir.
+    public func sendMute(_ hidden: Bool) {
+        sendTransient(["type": "mute", "on": hidden])
+    }
+
+    private func sendTransient(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object) else { return }
+        queue.async { [self] in clients.values.forEach { send(data, to: $0) } }
+    }
+
     public func sendStyle(position: SubtitlePosition, scale: Double, appearance: SubtitleAppearance = SubtitleAppearance()) {
         broadcast(["type": "style", "position": position.rawValue, "scale": scale,
                    "color": appearance.color.rawValue, "background": appearance.background,

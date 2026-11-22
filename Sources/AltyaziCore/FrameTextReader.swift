@@ -37,6 +37,8 @@ public final class FrameTextReader: @unchecked Sendable {
     private var stalls = 0
     private var latest: CVPixelBuffer?
     private var warmedUp = false
+    private var slowdown: Double = 1
+    private var paused = false
 
     /// Konuşma altyazıları altta, oyunun sorduğu sorular / seçenekler / görevler çoğu oyunda
     /// ekranın alt yarısında çıkar; varsayılan bölge ikisini de kapsar. Yanlar bilerek dışarıda: oyun
@@ -67,6 +69,15 @@ public final class FrameTextReader: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Isınma koruması: iki okuma arasındaki süreyi çarpar (1 = olağan). `nil` okumayı durdurur;
+    /// kareler yine saklanır (`latestFrame`), yalnız okunmaz.
+    public func setSlowdown(_ factor: Double?) {
+        lock.lock()
+        paused = factor == nil
+        slowdown = max(1, factor ?? 1)
+        lock.unlock()
+    }
+
     /// Akıştan gelen en son kare ("ekranı çevir" için tüm ekran buradan okunur).
     public var latestFrame: CVPixelBuffer? { locked { latest } }
 
@@ -74,6 +85,10 @@ public final class FrameTextReader: @unchecked Sendable {
         let now = Date()
         lock.lock()
         latest = pixelBuffer
+        if paused {
+            lock.unlock()
+            return
+        }
         if busy {
             guard now.timeIntervalSince(busySince) > (warmedUp ? stallTimeout : warmUpTimeout) else {
                 lock.unlock()
@@ -86,7 +101,7 @@ public final class FrameTextReader: @unchecked Sendable {
             queue = DispatchQueue(label: "altyazitr.reader.\(generation)")
             busy = false
         }
-        guard now.timeIntervalSince(lastRun) >= interval else {
+        guard now.timeIntervalSince(lastRun) >= interval * slowdown else {
             lock.unlock()
             return
         }
