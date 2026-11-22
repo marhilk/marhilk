@@ -1185,6 +1185,63 @@ final class SubtitlePresetTests: XCTestCase {
     }
 }
 
+final class GameHelperTests: XCTestCase {
+    func testRequestCarriesTheImageFirstThenTheContext() throws {
+        let helper = GameHelper(apiKey: "anahtar")
+        let jpeg = Data([0xFF, 0xD8, 0xFF, 0xD9])
+        let context = GameHelper.Context(game: "Grand Theft Auto V", question: "Polisten nasıl kurtulurum?",
+                                         objective: "Lose the cops.", recentLines: ["Franklin: We gotta move!"],
+                                         depth: .clearer, earlierHints: ["Görüş alanından çık."])
+        let body = helper.body(jpeg: jpeg, context: context)
+        XCTAssertEqual(body["model"] as? String, "claude-opus-5-5")
+        // Bu modelde düşünme kapatılamaz ve elle ayarlanamaz: istekte `thinking` alanı olmamalı.
+        XCTAssertNil(body["thinking"])
+        XCTAssertEqual((body["output_config"] as? [String: Any])?["effort"] as? String, "medium")
+        let message = try XCTUnwrap((body["messages"] as? [[String: Any]])?.first)
+        let content = try XCTUnwrap(message["content"] as? [[String: Any]])
+        XCTAssertEqual(content.map { $0["type"] as? String }, ["image", "text"])
+        let source = try XCTUnwrap(content[0]["source"] as? [String: Any])
+        XCTAssertEqual(source["type"] as? String, "base64")
+        XCTAssertEqual(source["media_type"] as? String, "image/jpeg")
+        XCTAssertEqual(source["data"] as? String, jpeg.base64EncodedString())
+        let text = try XCTUnwrap(content[1]["text"] as? String)
+        for piece in ["Grand Theft Auto V", "Hint level: 2 of 3", "Lose the cops.", "Franklin: We gotta move!",
+                      "Polisten nasıl kurtulurum?", "1. Görüş alanından çık."] {
+            XCTAssertTrue(text.contains(piece), "istekte eksik: \(piece)")
+        }
+        XCTAssertNoThrow(try JSONSerialization.data(withJSONObject: body))
+    }
+
+    func testPromptSaysSoWhenGameAndQuestionAreMissing() {
+        let text = GameHelper.prompt(for: GameHelper.Context())
+        XCTAssertTrue(text.contains("Game: not specified"))
+        XCTAssertTrue(text.contains("Hint level: 1 of 3"))
+        XCTAssertTrue(text.contains("(none; they only pressed"))
+        XCTAssertFalse(text.contains("Hints already given"))
+        XCTAssertFalse(text.contains("Recent subtitle lines"))
+    }
+
+    func testAnswerIsReadPastThinkingBlocksWithItsCost() throws {
+        let answer = try GameHelper.parse([
+            "stop_reason": "end_turn",
+            "content": [["type": "thinking", "thinking": ""], ["type": "text", "text": "  Ara sokağa gir.  "]],
+            "usage": ["input_tokens": 2_000, "output_tokens": 500],
+        ])
+        XCTAssertEqual(answer.text, "Ara sokağa gir.")
+        XCTAssertEqual(answer.cost, 0.018, accuracy: 0.0001)   // 2000 × 4 $ + 500 × 20 $, milyonda
+    }
+
+    func testRefusalAndEmptyAnswerAreErrorsNotBlankHints() {
+        XCTAssertThrowsError(try GameHelper.parse(["stop_reason": "refusal", "content": [["type": "text", "text": "x"]]]))
+        XCTAssertThrowsError(try GameHelper.parse(["stop_reason": "end_turn", "content": [["type": "thinking", "thinking": ""]]]))
+    }
+
+    func testDepthStopsAtTheFullSolution() {
+        XCTAssertEqual(GameHelper.Depth.nudge.next, .clearer)
+        XCTAssertEqual(GameHelper.Depth.full.next, .full)
+    }
+}
+
 final class GamePackTests: XCTestCase {
     func testPacksAreWellFormed() {
         XCTAssertEqual(Set(GamePacks.all.map { $0.name.lowercased() }).count, GamePacks.all.count, "oyun adları tekil")

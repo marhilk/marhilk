@@ -180,6 +180,14 @@ public final class SubtitleServer: @unchecked Sendable {
         sendTransient(["type": "mute", "on": hidden])
     }
 
+    /// "Takıldım" yardımcısının kutusu. `state`: "working" (ekrana bakıyor), "done" (`text` gösterilir),
+    /// "clear" (kaldır). Kalıcı değildir.
+    public func sendHelp(state: String, text: String? = nil, seconds: Double = 45) {
+        var object: [String: Any] = ["type": "help", "state": state, "ms": Int(seconds * 1000)]
+        if let text { object["text"] = text }
+        sendTransient(object)
+    }
+
     private func sendTransient(_ object: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: object) else { return }
         queue.async { [self] in clients.values.forEach { send(data, to: $0) } }

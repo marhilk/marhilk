@@ -233,6 +233,36 @@
         reportVisibility();
     }
 
+    // ---------- "Takıldım" yardımcısı ----------
+
+    var helpEl = document.getElementById('help');
+    var helpTimer = null;
+    var helpShowing = false;
+
+    /** Telefondan istenen ipucu: ekranın sağında bir kutuda durur; süresi dolunca ya da GERİ tuşuyla kalkar. */
+    function showHelp(message) {
+        clearTimeout(helpTimer);
+        while (helpEl.firstChild) { helpEl.removeChild(helpEl.firstChild); }
+        helpShowing = message.state === 'working' || (message.state === 'done' && typeof message.text === 'string');
+        if (!helpShowing) {
+            helpEl.className = '';
+            return;
+        }
+        var title = document.createElement('b');
+        title.textContent = message.state === 'working' ? 'Yardımcı ekrana bakıyor…' : 'İpucu';
+        helpEl.appendChild(title);
+        if (message.state === 'done') {
+            var body = document.createElement('div');
+            body.textContent = message.text.slice(0, 900);
+            helpEl.appendChild(body);
+            helpTimer = setTimeout(function () { showHelp({}); }, Math.min(120000, Math.max(5000, message.ms || 45000)));
+        } else {
+            // Yanıt hiç gelmezse kutu ekranda takılı kalmasın.
+            helpTimer = setTimeout(function () { showHelp({}); }, 100000);
+        }
+        helpEl.className = message.state === 'working' ? 'visible working' : 'visible';
+    }
+
     // ---------- "Ekranı çevir" ----------
 
     function showNotice(text, forMs) {
@@ -361,6 +391,8 @@
             heartbeat = true;
         } else if (message.type === 'screen') {
             onScreenMessage(message);
+        } else if (message.type === 'help') {
+            showHelp(message);
         } else if (message.type === 'mute') {
             setMuted(message.on === true);
         } else if (message.type === 'notice') {
@@ -429,6 +461,7 @@
         showHud([]);
         clearScreen();
         showNotice('');
+        showHelp({});
         setStatus('Telefon bağlantısı koptu, yeniden deneniyor…', true);
         connect();
     }
@@ -741,6 +774,11 @@
                 return;
             case 461:                                      // GERİ (LG)
             case 10009:                                    // GERİ (Samsung)
+                if (helpShowing) {
+                    // Önce ipucu kutusunu kaldır.
+                    showHelp({});
+                    return;
+                }
                 if (screenShowing) {
                     // Önce ekran çevirisini kaldır; uygulamadan çıkmak için bir kez daha basılır.
                     clearScreen();

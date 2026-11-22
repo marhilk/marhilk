@@ -650,9 +650,21 @@ private struct HistorySheet: View {
 
 private struct QuickActions: View {
     @EnvironmentObject private var model: AppModel
+    @State private var showHelper = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            #if DEBUG
+            // DENEME: yalnız geliştirme sürümünde. Yayına çıkmadan önce gizlilik metni güncellenmeli
+            // (bu özellik ekranın görüntüsünü yapay zekâya gönderir).
+            ActionTile(symbol: "lightbulb.fill", title: "Takıldım",
+                       detail: model.aiEnabled ? "Yardımcı ekrana bakıp ipucu versin (deneme)."
+                                               : "Yapay zekâ anahtarı gerekli (Ayarlar).",
+                       highlighted: model.helper.working || !model.helper.hints.isEmpty, compact: true) {
+                showHelper = true
+            }
+            .sheet(isPresented: $showHelper) { HelperSheet() }
+            #endif
             HStack(spacing: 12) {
                 ActionTile(symbol: "text.viewfinder",
                            title: model.screenState == nil ? "Ekranı çevir" : "Çeviriyi kaldır",
@@ -936,6 +948,101 @@ private struct SettingsSheet: View {
 }
 
 /// Abonelik ekranını açar (ana ekranın herhangi bir yerinden).
+/// "Takıldım" yardımcısı (DENEME): isteğe bağlı bir soru yazılır, ipucu burada ve televizyonda görünür.
+/// İpucu kademelidir: önce küçük bir işaret, istenirse daha açığı, en son tam çözüm.
+private struct HelperSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var question = ""
+    @FocusState private var typing: Bool
+
+    private static let depthNames = ["Küçük ipucu", "Daha açık ipucu", "Tam çözüm"]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if model.helper.hints.isEmpty {
+                        Text("Yardımcı, televizyonda şu an ne varsa ona ve son konuşmalara bakar. Soru yazmak zorunda değilsin; yazarsan cevap daha isabetli olur.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        TextField("Ne soruyorsun? (boş bırakabilirsin)", text: $question, axis: .vertical)
+                            .lineLimit(1...4)
+                            .focused($typing)
+                            .padding(12)
+                            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    } else {
+                        if !model.helper.question.isEmpty {
+                            Text(model.helper.question).font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        ForEach(Array(model.helper.hints.enumerated()), id: \.offset) { index, hint in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(Self.depthNames[min(index, 2)].uppercased(with: Locale(identifier: "tr")))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.yellow)
+                                Text(hint).font(.body).fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        }
+                    }
+
+                    if model.helper.working {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Yardımcı ekrana bakıyor…").foregroundStyle(.secondary)
+                        }
+                    } else if model.helper.hints.isEmpty {
+                        Button("İpucu ver") {
+                            typing = false
+                            model.askHelper(question: question)
+                        }
+                        .buttonStyle(ProminentAction())
+                    } else {
+                        if model.helper.canGoDeeper {
+                            Button(model.helper.hints.count == 1 ? "Yetmedi, daha açık söyle" : "Tam çözümü ver") {
+                                model.askHelper(deeper: true)
+                            }
+                            .buttonStyle(ProminentAction())
+                        }
+                        Button("Yeni soru") {
+                            question = ""
+                            model.closeHelper()
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                    }
+
+                    if let error = model.helper.error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let seconds = model.helper.lastSeconds, let cost = model.helper.lastCost {
+                        Text(String(format: "Deneme ölçümü — son soru: %.0f sn, yaklaşık %.3f $ · bu oturum: %d soru, %.3f $",
+                                    seconds, cost, model.helper.asked, model.helper.totalCost))
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Text("Yardımcı yanılabilir; söylediği olmazsa bir kademe daha açığını iste. Düğmeye bastığında o anki ekran görüntüsü, kendi yapay zekâ anahtarınla Anthropic'e gönderilir.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(16)
+            }
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+            .navigationTitle("Takıldım")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Bitti") { dismiss() } }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
 /// Hazır görünümler: her biri kendi biçimiyle yazılmış küçük bir örnek; dokununca uygulanır.
 private struct PresetRow: View {
     @EnvironmentObject private var model: AppModel

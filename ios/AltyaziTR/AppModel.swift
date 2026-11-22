@@ -1,4 +1,5 @@
 import CoreImage
+import ImageIO
 import AltyaziCore
 import CoreVideo
 import RemotePlayKit
@@ -259,6 +260,109 @@ final class AppModel: ObservableObject {
         case .critical: return "Çok sıcak"
         @unknown default: return "Bilinmiyor"
         }
+    }
+
+    // MARK: "Takıldım" yardımcısı (DENEME)
+
+    /// Bir takılma anının durumu: soru, o ana dek verilen ipuçları (kademe kademe), bedel.
+    struct HelperState: Equatable {
+        var working = false
+        var question = ""
+        var hints: [String] = []
+        var error: String?
+        /// Son sorunun süresi (sn) ve yaklaşık bedeli (dolar); bu oturumdaki toplam bedel ve soru sayısı.
+        var lastSeconds: Double?
+        var lastCost: Double?
+        var totalCost = 0.0
+        var asked = 0
+        /// Daha açık bir ipucu istenebilir mi?
+        var canGoDeeper: Bool { !hints.isEmpty && hints.count < GameHelper.Depth.allCases.count }
+    }
+    @Published private(set) var helper = HelperState()
+    private var helperClient: GameHelper?
+    private var helperRun = 0
+
+    /// Ekrana bakıp ipucu ister. `deeper`: aynı takılma için bir kademe daha açık ipucu.
+    /// Yalnız kullanıcı istediğinde çalışır ve o anki TEK kareyi yapay zekâya gönderir.
+    func askHelper(question: String = "", deeper: Bool = false) {
+        guard !helper.working else { return }
+        guard let client = helperClient else {
+            helper.error = "Yardımcı için yapay zekâ anahtarı gerekli (Ayarlar)."
+            return
+        }
+        guard let frame = reader.latestFrame, let jpeg = Self.helperJPEG(from: frame) else {
+            helper.error = "Oyun görüntüsü henüz gelmedi; PS5 bağlanınca yeniden dene."
+            return
+        }
+        if !deeper {
+            helper.hints = []
+            helper.question = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        helper.error = nil
+        helper.working = true
+        helperRun += 1
+        let run = helperRun
+        let depth = GameHelper.Depth(rawValue: helper.hints.count + 1) ?? .full
+        // Görev yazısı okunmuyorsa (kapalı ya da ısınma koruması durdurmuş) eldeki yazı bayattır: gönderme.
+        let objective = hudEnabled && readingLoad != .minimal ? hudTracked : ""
+        let context = GameHelper.Context(game: selectedGame, question: helper.question, objective: objective,
+                                         recentLines: history.suffix(10).map { line in
+                                             (line.speaker.map { "\($0): " } ?? "") + (line.source.isEmpty ? line.translation : line.source)
+                                         },
+                                         depth: depth, earlierHints: helper.hints)
+        server.sendHelp(state: "working")
+        let started = Date()
+        Task {
+            do {
+                let answer = try await client.ask(jpeg: jpeg, context: context)
+                guard run == helperRun else { return }
+                helper.hints.append(answer.text)
+                helper.lastSeconds = Date().timeIntervalSince(started)
+                helper.lastCost = answer.cost
+                helper.totalCost += answer.cost
+                helper.asked += 1
+                helper.working = false
+                // Uzun ipucu ekranda daha uzun kalır.
+                server.sendHelp(state: "done", text: answer.text, seconds: max(30, min(90, Double(answer.text.count) * 0.15)))
+                helperLog.add(String(format: "[%@ · kademe %d · %.1f sn · %d+%d belirteç · $%.4f] S: %@ → %@",
+                                     selectedGame.isEmpty ? "oyun seçilmedi" : selectedGame, depth.rawValue,
+                                     helper.lastSeconds ?? 0, answer.inputTokens, answer.outputTokens, answer.cost,
+                                     helper.question.isEmpty ? "(yok)" : helper.question, answer.text))
+            } catch {
+                guard run == helperRun else { return }
+                helper.working = false
+                helper.error = error.localizedDescription
+                server.sendHelp(state: "clear")
+                helperLog.add("HATA: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// İpucu kutusunu televizyondan kaldırır ve takılma anını kapatır (süren istek varsa yanıtı yok sayılır).
+    func closeHelper() {
+        helperRun += 1
+        helper.working = false
+        helper.hints = []
+        helper.question = ""
+        helper.error = nil
+        server.sendHelp(state: "clear")
+    }
+
+    /// Deneme günlüğü: sorulan her soru, yanıtı, süresi ve bedeli (yalnız bu oturum; `:8080/takildim`).
+    let helperLog = DebugLog()
+
+    /// Kareyi yardımcıya gidecek boyuta getirir: uzun kenar 1456 piksel (modelin yazıyı rahat okuduğu,
+    /// bedeli de düşük tutan boy), JPEG.
+    private static func helperJPEG(from buffer: CVPixelBuffer) -> Data? {
+        var image = CIImage(cvPixelBuffer: buffer)
+        let longEdge = max(image.extent.width, image.extent.height)
+        if longEdge > 1456 {
+            let scale = 1456 / longEdge
+            image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        }
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        return CIContext().jpegRepresentation(of: image, colorSpace: space,
+                                              options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 0.75])
     }
 
     // MARK: Televizyonda gizle / göster
@@ -633,6 +737,23 @@ final class AppModel: ObservableObject {
                     self?.applyReadingLoad()
                 }
                 return ("text/plain; charset=utf-8", Data("ayarlandı\n".utf8))
+            }
+            if let question = text("/takildim?s=") {
+                // "+" = aynı takılma için bir kademe daha açık ipucu; "-" = kutuyu kapat.
+                Task { @MainActor in
+                    if question == "-" { self?.closeHelper() } else { self?.askHelper(question: question == "+" ? "" : question, deeper: question == "+") }
+                }
+                return ("text/plain; charset=utf-8", Data("istendi\n".utf8))
+            }
+            if path == "/takildim" {
+                let state = DispatchQueue.main.sync {
+                    MainActor.assumeIsolated { () -> String in
+                        guard let self else { return "" }
+                        let helper = self.helper
+                        return "anahtar: \(self.aiEnabled ? "var" : "YOK") · çalışıyor: \(helper.working) · soru sayısı: \(helper.asked) · toplam: $\(String(format: "%.4f", helper.totalCost))\(helper.error.map { " · HATA: \($0)" } ?? "")\n" + self.helperLog.text
+                    }
+                }
+                return ("text/plain; charset=utf-8", Data(state.utf8))
             }
             if let hidden = text("/gizle?d=") {
                 Task { @MainActor in self?.setTVMuted(hidden == "1") }
@@ -1220,6 +1341,7 @@ final class AppModel: ObservableObject {
     /// kaliteden önemli (kullanıcı kararı; Haiku repliklerin yalnız ~%13'ünde süreye yetişti).
     private func applyAIKey(_ key: String?) async {
         screen.setTranslator(key.map { ScreenTranslator(apiKey: $0) })
+        helperClient = key.map { GameHelper(apiKey: $0) }
         screen.onState = { [weak self] state, message in
             DispatchQueue.main.async {
                 switch state {
@@ -1519,8 +1641,7 @@ final class OverlayMerger: @unchecked Sendable {
     }
 }
 
-#if DEBUG
-/// Deneme çıktıları (yalnız geliştirme sürümünde, yerel ağdan okunur).
+/// Deneme çıktıları (yerel ağdan yalnız geliştirme sürümünde okunur).
 final class DebugLog: @unchecked Sendable {
     private let lock = NSLock()
     private var lines: [String] = []
@@ -1536,4 +1657,3 @@ final class DebugLog: @unchecked Sendable {
         return lines.joined(separator: "\n") + "\n"
     }
 }
-#endif
