@@ -209,6 +209,14 @@ final class AppModel: ObservableObject {
     private var thermalOverride: ProcessInfo.ThermalState?
     #endif
 
+    #if DEBUG
+    /// Deneme değeri 0…3 ise o ısı durumu; başka her değer (-1 dahil) "gerçek duruma dön" demektir.
+    /// (`ThermalState(rawValue:)` tanımsız sayıda `nil` dönmez; tanımsız bir durum üretir.)
+    static func thermalState(forDebugValue value: Int) -> ProcessInfo.ThermalState? {
+        (0...3).contains(value) ? ProcessInfo.ThermalState(rawValue: value) : nil
+    }
+    #endif
+
     private func watchThermalState() {
         for name in [ProcessInfo.thermalStateDidChangeNotification, Notification.Name.NSProcessInfoPowerStateDidChange] {
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -849,7 +857,7 @@ final class AppModel: ObservableObject {
             }
             if let degree = text("/isi?d=") {
                 Task { @MainActor in
-                    self?.thermalOverride = Int(degree).flatMap { ProcessInfo.ThermalState(rawValue: $0) }
+                    self?.thermalOverride = Int(degree).flatMap { AppModel.thermalState(forDebugValue: $0) }
                     self?.applyReadingLoad()
                 }
                 return ("text/plain; charset=utf-8", Data("ayarlandı\n".utf8))
@@ -925,7 +933,7 @@ final class AppModel: ObservableObject {
         }
         #if DEBUG
         let forced = defaults.object(forKey: "debugThermal") as? Int ?? Int(defaults.string(forKey: "debugThermal") ?? "") ?? -1
-        thermalOverride = ProcessInfo.ThermalState(rawValue: forced)
+        thermalOverride = Self.thermalState(forDebugValue: forced)
         #endif
         watchThermalState()
         setUpDubbing()
