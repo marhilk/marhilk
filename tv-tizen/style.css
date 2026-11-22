@@ -1,0 +1,190 @@
+html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    /* Saydam olmalı: HDMI penceresi sayfanın arkasında gösterilir. */
+    background: transparent;
+    font-family: "SamsungOne", "Samsung Sharp Sans", Arial, sans-serif;
+    color: #fff;
+}
+
+/* Yalnız bilgisayar tarayıcısındaki önizlemede: oyun görüntüsü yerine koyu zemin. */
+body.preview {
+    background: linear-gradient(160deg, #1d2a38, #0c1118);
+}
+
+/* LG (webOS) tarayıcısı: HDMI girişi tam ekran, her şeyin arkasında. */
+body.webos { background: #000; }
+
+#hdmi {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    background: #000;
+}
+
+#subtitle {
+    position: absolute;
+    left: 12%;
+    width: 76%;
+    box-sizing: border-box;
+    text-align: center;
+    font-size: 1.35vw;
+    font-weight: 500;
+    line-height: 1.45;
+    opacity: 0;
+}
+
+#subtitle.top { top: 5%; }
+#subtitle.bottom { bottom: 3%; }
+#subtitle.visible { opacity: 1; }
+
+/* Konuşma dökümü: satırlar alt alta; yeni gelen alttan kayarak girer, çıkan yukarı doğru silinir. */
+#subtitle .row {
+    max-height: 6em;
+    margin: 0.12em 0;
+    opacity: 1;
+    -webkit-transform: translateY(0);
+    transform: translateY(0);
+    -webkit-transition: opacity 0.22s linear, -webkit-transform 0.22s ease-out, max-height 0.3s ease-in, margin 0.3s ease-in;
+    transition: opacity 0.22s linear, transform 0.22s ease-out, max-height 0.3s ease-in, margin 0.3s ease-in;
+}
+
+#subtitle .row.entering {
+    opacity: 0;
+    -webkit-transform: translateY(0.9em);
+    transform: translateY(0.9em);
+}
+
+#subtitle .row.leaving {
+    opacity: 0;
+    max-height: 0;
+    margin: 0;
+    -webkit-transform: translateY(-0.7em);
+    transform: translateY(-0.7em);
+}
+
+#subtitle span {
+    display: inline;
+    padding: 0.08em 0.4em;
+    background: rgba(0, 0, 0, 0.62);
+    border-radius: 0.18em;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+    text-shadow: 0 0 0.1em #000;
+}
+
+/* Aradan çıkan satır: kaymadan, yerinde solar (üstündeki satıra binmesin). */
+#subtitle .row.leaving.inplace {
+    -webkit-transform: translateY(0);
+    transform: translateY(0);
+}
+
+/* Konuşanın adı */
+#subtitle b {
+    font-weight: 700;
+    color: #ffd84d;
+}
+
+#panel {
+    position: absolute;
+    top: 3%;
+    right: 2%;
+    max-width: 44%;
+    padding: 0.9vw 1.2vw;
+    background: rgba(0, 0, 0, 0.78);
+    border-radius: 0.6vw;
+    font-size: 1.25vw;
+    line-height: 1.5;
+}
+
+#panel.hidden { display: none; }
+#status { font-weight: 600; }
+#help { opacity: 0.75; font-size: 1.05vw; }
+
+/* "Ekranı çevir" katmanı: her çeviri, özgün yazının üstünde durur ve onu kapatır. */
+#screen, #hud {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+#screen .item, #hud .item {
+    position: absolute;
+    box-sizing: border-box;
+    padding: 0.08em 0.3em;
+    background: rgba(6, 8, 12, 0.97);
+    border-radius: 0.15em;
+    color: #fff;
+    font-weight: 500;
+    line-height: 1.22;
+    white-space: nowrap;
+}
+
+/* Paragraf: özgün metnin genişliğinde kalır, satır kırar. */
+#screen .item.block, #hud .item.block { white-space: normal; }
+
+/* Köşe yazılarının çevirisi: konuşma altyazısıyla aynı görünüm (yarı saydam zemin, okunaklı kalın yazı). */
+#hud .item {
+    padding: 0.22em 0.55em;
+    background: rgba(0, 0, 0, 0.66);
+    border-radius: 0.22em;
+    font-weight: 500;
+    line-height: 1.3;
+    letter-spacing: 0.01em;
+    text-shadow: 0 0 0.12em #000, 0 0.05em 0.1em rgba(0, 0, 0, 0.8);
+    -webkit-font-smoothing: antialiased;
+}
+
+/* Bir kutunun birden çok parçası tek öğede, her parça kendi satırında gelir. */
+#hud .item.block { white-space: pre-line; }
+
+/* Çevirinin içindeki tuş simgesi (oyunun kendi simgesinden kesilir). */
+.item img.key {
+    height: 1.25em;
+    width: auto;
+    margin: 0 0.12em;
+    vertical-align: -0.28em;
+}
+
+/* SARI tuş: son replikler, ekranın ortasında bir pano olarak. */
+#recall {
+    position: absolute;
+    left: 20%;
+    width: 60%;
+    top: 28%;
+    box-sizing: border-box;
+    padding: 1vw 1.4vw;
+    background: rgba(0, 0, 0, 0.82);
+    border-radius: 0.8vw;
+    font-size: 1.5vw;
+    line-height: 1.45;
+    display: none;
+}
+
+#recall.visible { display: block; }
+#recall .line { margin: 0.35em 0; }
+#recall b { font-weight: 700; color: #ffd84d; }
+
+#notice {
+    position: absolute;
+    left: 50%;
+    top: 46%;
+    -webkit-transform: translate(-50%, -50%);
+    transform: translate(-50%, -50%);
+    padding: 0.7vw 1.4vw;
+    background: rgba(0, 0, 0, 0.82);
+    border-radius: 0.6vw;
+    font-size: 1.5vw;
+    display: none;
+}
+
+#notice.visible { display: block; }

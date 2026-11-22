@@ -1,0 +1,279 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A100000000000000000000B1 /* AltyaziCore in Frameworks */ = {isa = PBXBuildFile; productRef = A100000000000000000000C1 /* AltyaziCore */; };
+		A100000000000000000000B2 /* RemotePlayKit in Frameworks */ = {isa = PBXBuildFile; productRef = A100000000000000000000C2 /* RemotePlayKit */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A1000000000000000000001A /* AltyaziTR.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AltyaziTR.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1000000000000000000001B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		A1000000000000000000002A /* AltyaziTR */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AltyaziTR;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A1000000000000000000003A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A100000000000000000000B1 /* AltyaziCore in Frameworks */,
+				A100000000000000000000B2 /* RemotePlayKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A1000000000000000000004A = {
+			isa = PBXGroup;
+			children = (
+				A1000000000000000000002A /* AltyaziTR */,
+				A1000000000000000000001B /* Info.plist */,
+				A1000000000000000000004B /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A1000000000000000000004B /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A1000000000000000000001A /* AltyaziTR.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A1000000000000000000005A /* AltyaziTR */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1000000000000000000008B /* Build configuration list for PBXNativeTarget "AltyaziTR" */;
+			buildPhases = (
+				A1000000000000000000006A /* Sources */,
+				A1000000000000000000003A /* Frameworks */,
+				A1000000000000000000006B /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A1000000000000000000002A /* AltyaziTR */,
+			);
+			name = AltyaziTR;
+			packageProductDependencies = (
+				A100000000000000000000C1 /* AltyaziCore */,
+				A100000000000000000000C2 /* RemotePlayKit */,
+			);
+			productName = AltyaziTR;
+			productReference = A1000000000000000000001A /* AltyaziTR.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A1000000000000000000007A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					A1000000000000000000005A = {
+						CreatedOnToolsVersion = 26.0;
+					};
+				};
+			};
+			buildConfigurationList = A1000000000000000000008A /* Build configuration list for PBXProject "AltyaziTR" */;
+			developmentRegion = tr;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				tr,
+				en,
+				Base,
+			);
+			mainGroup = A1000000000000000000004A;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A100000000000000000000D1 /* XCLocalSwiftPackageReference ".." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = A1000000000000000000004B /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A1000000000000000000005A /* AltyaziTR */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A1000000000000000000006B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A1000000000000000000006A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A1000000000000000000009A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A1000000000000000000009B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		A1000000000000000000009C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 13;
+				DEVELOPMENT_TEAM = CU678V7B55;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Marhilk;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Aynı Wi-Fi ağındaki PS5'inize bağlanmak ve çevrilen altyazıyı televizyonunuza göndermek için yerel ağ kullanılır.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Altyazısı olmayan oyunlarda konuşmayı Türkçeye çevirmek için oyunun sesi bu cihazda yazıya dökülür. Ses cihazdan dışarı çıkmaz.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.marhilk.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		A1000000000000000000009D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 13;
+				DEVELOPMENT_TEAM = CU678V7B55;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Marhilk;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Aynı Wi-Fi ağındaki PS5'inize bağlanmak ve çevrilen altyazıyı televizyonunuza göndermek için yerel ağ kullanılır.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Altyazısı olmayan oyunlarda konuşmayı Türkçeye çevirmek için oyunun sesi bu cihazda yazıya dökülür. Ses cihazdan dışarı çıkmaz.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.marhilk.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A100000000000000000000D1 /* XCLocalSwiftPackageReference ".." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A100000000000000000000C1 /* AltyaziCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AltyaziCore;
+		};
+		A100000000000000000000C2 /* RemotePlayKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RemotePlayKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+
+/* Begin XCConfigurationList section */
+		A1000000000000000000008A /* Build configuration list for PBXProject "AltyaziTR" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000009A /* Debug */,
+				A1000000000000000000009B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1000000000000000000008B /* Build configuration list for PBXNativeTarget "AltyaziTR" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000009C /* Debug */,
+				A1000000000000000000009D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A1000000000000000000007A /* Project object */;
+}

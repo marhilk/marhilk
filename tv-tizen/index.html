@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=1920, user-scalable=no">
+    <title>Marhilk</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- HDMI görüntüsü bu sayfanın ARKASINDA oynar; sayfa saydamdır. -->
+    <!-- "Ekranı çevir": duraklatılmış ekrandaki yazıların çevirisi, kendi yerlerinde -->
+    <!-- Görev/ipucu yazılarının çevirisi: oyun sürerken köşede, yerinde -->
+    <div id="hud"></div>
+    <div id="screen"></div>
+    <div id="notice"></div>
+    <!-- SARI tuş: kaçırılan son replikler -->
+    <div id="recall"></div>
+    <div id="subtitle" class="bottom" aria-live="polite"></div>
+    <div id="panel">
+        <div id="status">Başlatılıyor…</div>
+        <div id="help">SARI son replikler · MAVİ ekrandaki her şeyi çevir · ▲▼ yazının yeri · ◀▶ yazı boyutu · KIRMIZI HDMI değiştir · TAMAM bu paneli gizle · GERİ çıkış</div>
+    </div>
+    <script src="$WEBAPIS/webapis/webapis.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>

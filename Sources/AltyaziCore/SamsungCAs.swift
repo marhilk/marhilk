@@ -1,0 +1,42 @@
+// Samsung'un TV geliştirici sertifikalarını imzalayan ara sertifikalar (herkese açık CA sertifikaları;
+// Tizen Studio ile dağıtılır). Paket imzasında yaprak sertifikanın ardından zincire eklenir.
+enum SamsungCAs {
+    static let authorCA = [
+        "MIIEfzCCA2egAwIBAgIEaFN6QzANBgkqhkiG9w0BAQ0FADBeMRowGAYDVQQKDBFUaXplbiBBc3NvY2lhdGlvbjEaMBgGA1UECwwR",
+        "VGl6ZW4gQXNzb2NpYXRpb24xJDAiBgNVBAMMG1RpemVuIERldmVsb3BlcnMgUm9vdCBDbGFzczAeFw0yNTA2MTkwNDI2MzhaFw00",
+        "MDA2MTkwNDI2MzhaMIGSMQswCQYDVQQGEwJLUjEaMBgGA1UECAwRUmVwdWJsaWMgb2YgS29yZWExEzARBgNVBAcMClN1d29uIENp",
+        "dHkxJjAkBgNVBAoMHVNhbXN1bmcgRWxlY3Ryb25pY3MgQ28uLCBMdGQuMQswCQYDVQQLDAJWRDEdMBsGA1UEAwwUU2Ftc3VuZyBW",
+        "RCBBdXRob3IgQ0EwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoICAQCNLJUDeRdCsRgFNc0VW3Jwx1V/H9EcNmuA0RwLqyJy",
+        "urv0pRyClBShiPBBnJP+rt91k9zhqpTp5r/8xUnIWyyuCd7PassOp4po3ZiLv/0yFclSjIpYIOHYyIHZkamCm6+L5fSmOzXnzwRI",
+        "d/1rb2LKuz9AP3Hk9I0TSYxlSFbz0jkbAxvcGgrZA6siohXUwKRxWfhZTpPQsWd9ZtNRQmg6XYouK9h06TxJ8mYHIpvaDwfnxFPt",
+        "YdAjljCAjUr/UdNPKnC13JCWTCDQXK5ZPSbLxQZD5tDbZSw7kjXFGIHts8bQDN2knMqal1dzZjpa5pvrRiWeimg59duMMKzs8l96",
+        "Hap+13ND6+sN+0gvFc4JuzBUoqRaQqW/WHl7d1+ySC0z2KUhc4bRUK28rT8fWJ0YkDpxjTvxuM6qdaDnraPnJO6Cze1MoD7yCDcL",
+        "kWUmMOv8yxD1cpZcWN7ZMlUzKt73TqHce9zxkvo5QB3VsXPC8H5LP32vRB03XBhqL6yDDejioyEtpgn3WOdkHz6sJqTvoKe8fSoE",
+        "a+S6SXctsVBI5RMToq9q20rNjCSVGur56WVc8jkXuc3RSxgFzMx3RVunfy12hQnbFTWPwfPFS+YO/eHC2w6O9nB9sm7lHsm+PPc5",
+        "Nrxty7AS/qVvwLPlkgDwPF7U4LT90ycz+wYHC8LIRwIDAQABoxAwDjAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBDQUAA4IBAQBN",
+        "SFmmWl9AjcxAyNWQBlO8/Wrc70MlB2JpZ55Vuw2e8rQvWmBC5SjNRHmIu57HgMMGuj0oudCjH/fUkIIk4XC8DMAj82wUMPKHaihD",
+        "zylEtj4Otti1SNNjdCIvVPJg3FzcqWR/8xxrYrfoAWsS2eTTFpx2Ogc3n4XevbwfDPQiWZhE88cbuzWcHIBbwRVU4kjEdFXcsuj6",
+        "hLijMXkd/BFgtUOhpo+5H3OnLKdl9yjovOP9A4H3/Ip1ptM7QskVNjLdgJ8wSzZvFSVrYL7Oft82Jy86eKrQ9kDg46qaDbBfUzRs",
+        "8akbSfImsskYO97EB+GXbtx92EBhBSHFKe/GAM0p",
+    ].joined()
+
+    static let publicDistributorCA = [
+        "MIIEvDCCA6SgAwIBAgIQEFcJZvLWjnZy2s9RsDWhmTANBgkqhkiG9w0BAQ0FADCBkTELMAkGA1UEBhMCS1IxFDASBgNVBAgMC1Nv",
+        "dXRoIEtvcmVhMQ4wDAYDVQQHDAVTdXdvbjEmMCQGA1UECgwdU2Ftc3VuZyBFbGVjdHJvbmljcyBDby4sIEx0ZC4xCzAJBgNVBAsM",
+        "AlZEMScwJQYDVQQDDB5WRCBERVZFTE9QRVIgUHVibGljIFJvb3QgQ2xhc3MwHhcNMjUwNjE3MTAyMDEyWhcNMjkwNjE2MjEwMDAw",
+        "WjCBjzELMAkGA1UEBhMCS1IxFDASBgNVBAgMC1NvdXRoIEtvcmVhMQ4wDAYDVQQHDAVTdXdvbjEmMCQGA1UECgwdU2Ftc3VuZyBF",
+        "bGVjdHJvbmljcyBDby4sIEx0ZC4xCzAJBgNVBAsMAlZEMSUwIwYDVQQDDBxWRCBERVZFTE9QRVIgUHVibGljIENBIENsYXNzMIIC",
+        "IjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAymA8xOpycAu11WBrw4n2+mIdXfA9jzgEI3wYdn7o2o4H5o22jihR8aEpsrhW",
+        "+GTgi+90GxUGwO+o/Nwp5IFp2alNyunF251uVmsj1WtHBdWy31ex811H6dR0EfJeK5Ksb0XoOLbQP0+K6UM6ojXpYk1Q0aWBoIYD",
+        "Imgu4zsB75Q30KGVlYqvvUtr0KVNao9LhPLWda3hqe2qwFZSwd1d9N+hHO6xPrtnjO2cx63kPeWJ3GLmO/0phb+UdMQcGJ2KBpAp",
+        "b/WhN+uDjucvAOwbMFOU3NymS7BWZzS6/Rca8WEJkY0XBGndUaniYiqOUisQ5aP8I5HIP9EoM/wtk/ldy1CVckX1DyI1o/ZUQWPX",
+        "zPsb0/cmKOB1N33CFvejvsrJDipIMUW8TgB5qw/WHbiOlyxPDc+G8LjJ2ww1wFw9dGVIYpAslcXGyk7r0gHW939mJhUIwP9xZYwG",
+        "dPKSgjHgjAZrWWrE4D1KqEayHVLRhLdhYisHPuqmtuEdbXg32yxCeONdSEz0Z7I2CYn9RKIwBzkuWGjwtCyrvocp0AKANve64h0A",
+        "V1ttlt4hwLbbnLrFtlF1RMFv6mcnz8pg6sLHLcKoqVJ50X9ZvMCCj22rlO0FUZ36M1CiV9HJIxH/WoPjftHHuwF+CuJv2kNZuwjT",
+        "B8dtYpg5PK2sEimB4oJomS8CAwEAAaMQMA4wDAYDVR0TBAUwAwEB/zANBgkqhkiG9w0BAQ0FAAOCAQEADtwJOvOAbqqgiLzR9cD6",
+        "HQ2Fofjcoyj69XjduhL5syzx82ASu2GeZDYOApG9Uwmb1w1hXl/UHUFHp0Ob/6SV2wXJTZbBMQlOaYEYwB1crToTfSMTJ5t6LuR+",
+        "mRQvdBHLFM94fRQjQz3ZZOtMsq2WvcWN7ZEUDK1KMh+RP5e7z1GlHCJ00lGqNMrqVf0AMRm3iYfT+46/+CL3IY3iWbn2g3e8mPr0",
+        "U4ZBpAdWawfHRX21oTCU3b5rJ/s1G7dcvkqkvu74HrY4f0dpiRCctgdcVuQnWOPFIlLJEkYOiQV1c5Ro/cWUMCo0oR4icvHXb4dP",
+        "Fy+35NUwLfcmza3lFdLgrQ==",
+    ].joined()
+}

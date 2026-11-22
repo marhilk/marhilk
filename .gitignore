@@ -1,0 +1,7 @@
+.build/
+.swiftpm/
+third_party/
+*.wgt
+.DS_Store
+xcuserdata/
+*.xcuserstate

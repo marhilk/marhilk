@@ -1,0 +1,4 @@
+module CChiaki {
+    header "altyazi_rp.h"
+    export *
+}
