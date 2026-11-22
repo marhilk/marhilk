@@ -188,6 +188,17 @@ public final class SubtitleServer: @unchecked Sendable {
         sendTransient(object)
     }
 
+    /// Dublaj: televizyon `path` adresindeki sesi (telefonun web sunucusundan) alıp sırayla çalar.
+    /// Çalınca `{"type":"spoke","id":…,"ok":…}` iletisiyle bildirir.
+    public func sendSpeak(path: String, volume: Double) {
+        sendTransient(["type": "speak", "path": path, "volume": max(0, min(1, volume))])
+    }
+
+    /// Televizyonda çalan ve sırada bekleyen dublaj seslerini keser.
+    public func sendSpeakStop() {
+        sendTransient(["type": "speak", "stop": true])
+    }
+
     private func sendTransient(_ object: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: object) else { return }
         queue.async { [self] in clients.values.forEach { send(data, to: $0) } }

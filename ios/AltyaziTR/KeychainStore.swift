@@ -82,4 +82,28 @@ enum KeychainStore {
         item[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(item as CFDictionary, nil)
     }
+
+    // MARK: - ElevenLabs (dublaj) anahtarı
+
+    private static var speechQuery: [CFString: Any] {
+        [kSecClass: kSecClassGenericPassword, kSecAttrService: "com.marhilk.app.speech", kSecAttrAccount: "elevenlabs-key"]
+    }
+
+    static func loadSpeechKey() -> String? {
+        var request = speechQuery
+        request[kSecReturnData] = true
+        request[kSecMatchLimit] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(request as CFDictionary, &result) == errSecSuccess, let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func saveSpeechKey(_ key: String?) {
+        SecItemDelete(speechQuery as CFDictionary)
+        guard let key, !key.isEmpty else { return }
+        var item = speechQuery
+        item[kSecValueData] = Data(key.utf8)
+        item[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(item as CFDictionary, nil)
+    }
 }

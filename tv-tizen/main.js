@@ -233,6 +233,75 @@
         reportVisibility();
     }
 
+    // ---------- Dublaj ----------
+
+    /**
+     * Telefon her repliğin Türkçe sesini üretip adresini yollar; televizyon sırayla çalar. Oyunun kendi sesi
+     * sürer, Türkçe ses üstüne okunur. Konuşma hızlanınca geride kalmamak için sırada en çok iki replik bekler.
+     */
+    var phoneHost = null;
+    var speechQueue = [];
+    var speaking = null;
+
+    function stopSpeech() {
+        speechQueue = [];
+        if (speaking) {
+            try { speaking.pause(); } catch (e) { /* zaten durmuş */ }
+            speaking = null;
+        }
+    }
+
+    function reportSpoken(item, ok, startedAt) {
+        if (socket && socket.readyState === 1) {
+            try {
+                socket.send(JSON.stringify({ type: 'spoke', path: item.path, ok: ok, wait: startedAt ? startedAt - item.at : -1 }));
+            } catch (e) { /* bildirim yalnız ölçüm içindir */ }
+        }
+    }
+
+    function speakNext() {
+        if (speaking || !speechQueue.length) { return; }
+        var item = speechQueue.shift();
+        var audio = new Audio();
+        var done = false;
+        var startedAt = 0;
+        var guard = null;
+        function finish(ok) {
+            if (done) { return; }
+            done = true;
+            clearTimeout(guard);
+            if (speaking === audio) { speaking = null; }
+            reportSpoken(item, ok, startedAt);
+            speakNext();
+        }
+        speaking = audio;
+        audio.volume = item.volume;
+        audio.onplaying = function () { startedAt = Date.now(); };
+        audio.onended = function () { finish(true); };
+        audio.onerror = function () { finish(false); };
+        // Ses hiç başlamazsa ya da bitişi bildirilmezse sıra tıkanmasın.
+        guard = setTimeout(function () {
+            try { audio.pause(); } catch (e) { /* zaten durmuş */ }
+            finish(false);
+        }, 25000);
+        audio.src = (servedByPhone || !phoneHost ? '' : 'http://' + phoneHost + ':' + HTTP_PORT) + item.path;
+        try {
+            var playing = audio.play();
+            if (playing && playing['catch']) { playing['catch'](function () { finish(false); }); }
+        } catch (e) {
+            finish(false);
+        }
+    }
+
+    function onSpeak(message) {
+        if (message.stop === true) { return stopSpeech(); }
+        if (typeof message.path !== 'string' || message.path.indexOf('/ses/') !== 0) { return; }
+        var volume = typeof message.volume === 'number' ? Math.max(0, Math.min(1, message.volume)) : 1;
+        speechQueue.push({ path: message.path, volume: volume, at: Date.now() });
+        while (speechQueue.length > 2) { reportSpoken(speechQueue.shift(), false, 0); }
+        speakNext();
+    }
+
     // ---------- "Takıldım" yardımcısı ----------
 
     var helpEl = document.getElementById('help');
@@ -391,6 +460,8 @@
             heartbeat = true;
         } else if (message.type === 'screen') {
             onScreenMessage(message);
+        } else if (message.type === 'speak') {
+            onSpeak(message);
         } else if (message.type === 'help') {
             showHelp(message);
         } else if (message.type === 'mute') {
@@ -462,6 +533,7 @@
         clearScreen();
         showNotice('');
         showHelp({});
+        stopSpeech();
         setStatus('Telefon bağlantısı koptu, yeniden deneniyor…', true);
         connect();
     }
@@ -483,6 +555,7 @@
 
     function adopt(ws, host) {
         socket = ws;
+        phoneHost = host;
         lastHeard = Date.now();
         heartbeat = false;
         try {

@@ -11,6 +11,9 @@ public final class TVPageServer: @unchecked Sendable {
     /// Gömülü dosyalardan önce sorulan ek yanıtlayıcı (yalnız geliştirme sürümünde teşhis için kullanılır).
     public var extra: (@Sendable (_ path: String) -> (type: String, body: Data)?)?
 
+    /// Dublaj sesleri: televizyon bunları `/ses/<kimlik>` adresinden alıp çalar.
+    public let clips = ClipStore()
+
     private let queue = DispatchQueue(label: "altyazitr.pageserver")
     private var listener: NWListener?
 
@@ -91,7 +94,13 @@ public final class TVPageServer: @unchecked Sendable {
     private func reply(_ connection: NWConnection, to head: String) {
         let answer: (status: String, type: String, body: Data)
         if let path = Self.path(fromRequest: head) {
-            if let custom = extra?(path) {
+            if path.hasPrefix(ClipStore.prefix) {
+                if let clip = clips.clip(forPath: path) {
+                    answer = ("200 OK", clip.type, clip.body)
+                } else {
+                    answer = ("404 Not Found", "text/plain; charset=utf-8", Data())
+                }
+            } else if let custom = extra?(path) {
                 answer = ("200 OK", custom.type, custom.body)
             } else {
                 answer = Self.response(forPath: path)
@@ -111,5 +120,39 @@ public final class TVPageServer: @unchecked Sendable {
             """.utf8)
         message.append(answer.body)
         connection.send(content: message, completion: .contentProcessed { _ in connection.cancel() })
+    }
+}
+
+/// Televizyonun çalacağı kısa ses parçaları (dublaj). Yalnız son birkaç parça tutulur: televizyon bir
+/// parçayı istendiği anda alır, eskisi gerekmez.
+public final class ClipStore: @unchecked Sendable {
+    public static let prefix = "/ses/"
+
+    private let lock = NSLock()
+    private var clips: [(id: Int, type: String, body: Data)] = []
+    private var next = 1
+    private let limit: Int
+
+    public init(limit: Int = 8) {
+        self.limit = max(1, limit)
+    }
+
+    /// Parçayı saklar; televizyona yollanacak yolu döner ("/ses/12").
+    public func add(_ body: Data, type: String) -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        let id = next
+        next += 1
+        clips.append((id, type, body))
+        if clips.count > limit { clips.removeFirst(clips.count - limit) }
+        return "\(Self.prefix)\(id)"
+    }
+
+    public func clip(forPath rawPath: String) -> (type: String, body: Data)? {
+        let path = rawPath.split(separator: "?", maxSplits: 1).first.map(String.init) ?? rawPath
+        guard path.hasPrefix(Self.prefix), let id = Int(path.dropFirst(Self.prefix.count)) else { return nil }
+        lock.lock()
+        defer { lock.unlock() }
+        return clips.first { $0.id == id }.map { ($0.type, $0.body) }
     }
 }

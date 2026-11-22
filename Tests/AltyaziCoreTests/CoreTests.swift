@@ -1242,6 +1242,113 @@ final class GameHelperTests: XCTestCase {
     }
 }
 
+final class DubbingTests: XCTestCase {
+    func testSameCharacterKeepsItsVoiceAndOthersGetDifferentOnes() {
+        var cast = VoiceCast()
+        let kratos = cast.voice(for: "Kratos", gender: .male)
+        let atreus = cast.voice(for: "Atreus", gender: .male)
+        let freya = cast.voice(for: "Freya", gender: .female)
+        XCTAssertNotEqual(kratos, atreus)
+        XCTAssertEqual(cast.voice(for: "kratos", gender: .male), kratos)   // büyük-küçük harf fark etmez
+        XCTAssertTrue(VoiceCast.men.contains(kratos))
+        XCTAssertTrue(VoiceCast.women.contains(freya))
+        // Saklanan dağıtım yeni oturumda aynı sesi verir.
+        var later = VoiceCast(assigned: cast.assigned)
+        XCTAssertEqual(later.voice(for: "Atreus", gender: .male), atreus)
+    }
+
+    func testUnknownSpeakerOrGenderIsReadByTheNarrator() {
+        var cast = VoiceCast()
+        XCTAssertEqual(cast.voice(for: nil, gender: .unknown), VoiceCast.narrator)
+        XCTAssertEqual(cast.voice(for: "  ", gender: .male), VoiceCast.narrator)
+        XCTAssertEqual(cast.voice(for: "Stranger", gender: .unknown), VoiceCast.narrator)
+        XCTAssertTrue(cast.assigned.isEmpty)
+    }
+
+    func testCrowdSharesVoicesEvenlyAndGenderChangeRecasts() {
+        var cast = VoiceCast()
+        for index in 0..<(VoiceCast.men.count * 2) { _ = cast.voice(for: "Asker \(index)", gender: .male) }
+        let usage = Dictionary(grouping: cast.assigned.values, by: { $0 }).mapValues(\.count)
+        XCTAssertEqual(Set(usage.values), [2])
+        // Kullanıcı cinsiyeti düzeltince ses öteki gruptan yeniden seçilir.
+        XCTAssertTrue(VoiceCast.women.contains(cast.voice(for: "Asker 0", gender: .female)))
+    }
+
+    func testVoicePoolsHaveNoDuplicates() {
+        let all = [VoiceCast.narrator] + VoiceCast.men + VoiceCast.women
+        XCTAssertEqual(Set(all.map(\.id)).count, all.count)
+        XCTAssertEqual(VoiceCast.voice(id: VoiceCast.women[0].id), VoiceCast.women[0])
+    }
+
+    func testGenderComesFromTheUserThenFromTheGamePack() {
+        let pack = GamePacks.find("God of War")
+        XCTAssertEqual(VoiceCast.gender(of: "Freya", pack: pack, overrides: [:]), .female)
+        XCTAssertEqual(VoiceCast.gender(of: "KRATOS", pack: pack, overrides: [:]), .male)
+        XCTAssertEqual(VoiceCast.gender(of: "Stranger", pack: pack, overrides: [:]), .unknown)
+        XCTAssertEqual(VoiceCast.gender(of: "Stranger", pack: pack, overrides: ["stranger": .male]), .male)
+        XCTAssertEqual(VoiceCast.gender(of: "Kratos", pack: nil, overrides: [:]), .unknown)
+        XCTAssertEqual(VoiceCast.gender(of: nil, pack: pack, overrides: [:]), .unknown)
+        // Etiket unvanla gelirse ad kelimelerden biridir.
+        XCTAssertEqual(VoiceCast.gender(of: "Captain Price", pack: GamePacks.find("Call of Duty: Modern Warfare"), overrides: [:]), .male)
+    }
+
+    func testEveryWomanListedBelongsToHerPack() {
+        for pack in GamePacks.all {
+            for name in pack.women { XCTAssertTrue(pack.terms.contains(name), "\(pack.name): \(name) pakette yok") }
+        }
+        XCTAssertEqual(Set(GamePacks.women.keys).subtracting(GamePacks.all.map(\.name)), [], "paketi olmayan oyun adı")
+    }
+
+    func testOnlySpeakableTextIsSent() {
+        XCTAssertEqual(DubText.clean("[Yalan] Evet, oradaydım."), "Evet, oradaydım.")
+        XCTAssertEqual(DubText.clean("Siper almak için [1] tuşuna   bas"), "Siper almak için tuşuna bas")
+        XCTAssertEqual(DubText.clean("- Hadi!"), "Hadi!")
+        XCTAssertNil(DubText.clean("..."))
+        XCTAssertNil(DubText.clean("[1]"))
+        XCTAssertEqual(DubText.clean(String(repeating: "a", count: 500))?.count, 320)
+    }
+
+    func testQueueKeepsOnlyTheNewestLines() {
+        var queue = LatestQueue<Int>(limit: 2)
+        XCTAssertEqual(queue.push(1), [])
+        XCTAssertEqual(queue.push(2), [])
+        XCTAssertEqual(queue.push(3), [1])
+        XCTAssertEqual(queue.pop(), 2)
+        XCTAssertEqual(queue.pop(), 3)
+        XCTAssertNil(queue.pop())
+    }
+
+    func testSpeechRequestAsksForTurkishOnTheFastModel() throws {
+        let request = try ElevenLabsSpeech(apiKey: "anahtar").request(text: "Merhaba.", voice: "ses1")
+        XCTAssertEqual(request.url?.absoluteString, "https://api.elevenlabs.io/v1/text-to-speech/ses1/stream?output_format=mp3_44100_64")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "xi-api-key"), "anahtar")
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(request.httpBody)) as? [String: Any])
+        XCTAssertEqual(body["text"] as? String, "Merhaba.")
+        XCTAssertEqual(body["model_id"] as? String, "eleven_flash_v2_5")
+        XCTAssertEqual(body["language_code"] as? String, "tr")
+    }
+
+    func testQuotaAndBadKeyAreToldApart() {
+        let quota = Data(#"{"detail":{"status":"quota_exceeded","message":"This request exceeds your quota."}}"#.utf8)
+        XCTAssertEqual(ElevenLabsSpeech.failure(status: 401, body: quota), .quota)
+        let key = Data(#"{"detail":{"status":"invalid_api_key","message":"Invalid API key"}}"#.utf8)
+        XCTAssertEqual(ElevenLabsSpeech.failure(status: 401, body: key), .unauthorized)
+        guard case .other = ElevenLabsSpeech.failure(status: 500, body: Data()) else { return XCTFail("beklenmeyen tür") }
+    }
+
+    func testClipStoreServesRecentClipsOnly() {
+        let store = ClipStore(limit: 2)
+        let first = store.add(Data([1]), type: "audio/mpeg")
+        let second = store.add(Data([2]), type: "audio/wav")
+        XCTAssertEqual(store.clip(forPath: second + "?x=1")?.type, "audio/wav")
+        XCTAssertEqual(store.clip(forPath: first)?.body, Data([1]))
+        _ = store.add(Data([3]), type: "audio/mpeg")
+        XCTAssertNil(store.clip(forPath: first), "eski parça atılmış olmalı")
+        XCTAssertNil(store.clip(forPath: "/ses/abc"))
+        XCTAssertNil(store.clip(forPath: "/main.js"))
+    }
+}
+
 final class GamePackTests: XCTestCase {
     func testPacksAreWellFormed() {
         XCTAssertEqual(Set(GamePacks.all.map { $0.name.lowercased() }).count, GamePacks.all.count, "oyun adları tekil")

@@ -819,6 +819,42 @@ private struct SettingsSheet: View {
                 }
 
                 Section {
+                    Toggle("Çeviriyi sesli oku", isOn: $model.dubEnabled)
+                    if model.dubEnabled {
+                        Picker("Ses", selection: $model.dubEngine) {
+                            Text("Cihaz sesi").tag(Dubber.Engine.system.rawValue)
+                            if model.dubHasKey { Text("ElevenLabs").tag(Dubber.Engine.eleven.rawValue) }
+                        }
+                        Picker("Nereden gelsin", selection: $model.dubOutput) {
+                            Text("Televizyon").tag(Dubber.Output.tv.rawValue)
+                            Text("Telefon").tag(Dubber.Output.phone.rawValue)
+                        }
+                        HStack(spacing: 12) {
+                            Image(systemName: "speaker.fill").foregroundStyle(.secondary)
+                            Slider(value: $model.dubVolume, in: 0.2...1)
+                            Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
+                        }
+                        .accessibilityLabel("Dublaj sesi düzeyi")
+                        NavigationLink("Karakter sesleri") { DubCastView() }
+                        Button("Örnek bir replik oku") {
+                            model.dub("Bu bir deneme. Çeviri bu sesle okunacak.", speaker: nil)
+                        }
+                    }
+                    #if DEBUG
+                    DubKeyField()
+                    #endif
+                } header: {
+                    Text("Dublaj (deneme)")
+                } footer: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Çevrilen her replik Türkçe seslendirilir. Oyunun kendi sesi kapanmaz, Türkçe ses üstüne okunur; istersen oyunun ses ayarlarından konuşma sesini (dialogue volume) kıs. Ses, replik ekrana geldikten kısa süre sonra başlar.")
+                        Text("Cihaz sesi ücretsizdir ve telefonda üretilir. ElevenLabs daha doğal konuşur ama internet ister ve okunan her harf hesabından düşer.")
+                        if !model.dubSummary.isEmpty { Text(model.dubSummary) }
+                        if let problem = model.dubProblem { Text(problem).foregroundStyle(.orange) }
+                    }
+                }
+
+                Section {
                     LabeledContent("Telefonun ısısı") {
                         Text(model.readingLoad >= .light ? "\(model.thermalName) · koruma devrede" : model.thermalName)
                             .foregroundStyle(model.readingLoad == .minimal ? Color.red : (model.readingLoad == .light ? Color.orange : Color.secondary))
@@ -948,6 +984,89 @@ private struct SettingsSheet: View {
 }
 
 /// Abonelik ekranını açar (ana ekranın herhangi bir yerinden).
+/// Dublajda hangi karakterin hangi sesle konuştuğu. Cinsiyet oyunun hazır paketinden gelir; paket yoksa ya da
+/// yanlışsa buradan seçilir. Adı yazmayan ya da cinsiyeti bilinmeyen konuşanlar anlatıcı sesiyle okunur.
+private struct DubCastView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        List {
+            Section {
+                row(name: "Anlatıcı", detail: "Adı yazmayan replikler", speaker: nil)
+            } footer: {
+                Text("Birçok oyun altyazıda konuşanın adını yazmaz (ör. GTA V); o oyunlarda bütün replikler bu sesle okunur.")
+            }
+            Section {
+                if model.seenSpeakers.isEmpty {
+                    Text("Henüz konuşan görülmedi. Oyunda adıyla konuşan biri çıkınca burada listelenir.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(model.seenSpeakers, id: \.self) { speaker in
+                    VStack(alignment: .leading, spacing: 8) {
+                        row(name: speaker, detail: nil, speaker: speaker)
+                        Picker("Cinsiyet", selection: Binding(
+                            get: { DubGender(rawValue: model.dubGenders[speaker.lowercased()] ?? "") ?? .unknown },
+                            set: { model.setDubGender($0, for: speaker) })) {
+                            Text("Kendiliğinden").tag(DubGender.unknown)
+                            Text("Erkek").tag(DubGender.male)
+                            Text("Kadın").tag(DubGender.female)
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                    .padding(.vertical, 4)
+                }
+            } header: {
+                Text("Bu oturumda konuşanlar")
+            } footer: {
+                Text("Erkek ya da kadın seçince karaktere o gruptan, başkasının kullanmadığı bir ses verilir ve o oyunda hep aynı kalır. Sesler ElevenLabs'in hazır sesleridir; cihaz sesinde karakterler ses perdesiyle ayrışır.")
+            }
+        }
+        .navigationTitle("Karakter sesleri")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func row(name: String, detail: String?, speaker: String?) -> some View {
+        let voice = model.dubVoice(for: speaker)
+        return HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                Text(detail ?? "\(voice.name) · \(voice.note)").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                model.dub("Merhaba, ben bu sesle konuşacağım.", speaker: speaker)
+            } label: {
+                Image(systemName: "play.circle.fill").font(.title2)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("\(name) sesini dinle")
+        }
+    }
+}
+
+#if DEBUG
+/// ElevenLabs anahtarı (yalnız geliştirme sürümünde): yayından önce gizlilik metni güncellenmeli.
+private struct DubKeyField: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var key = ""
+
+    var body: some View {
+        if model.dubHasKey {
+            Button("ElevenLabs anahtarını sil", role: .destructive) { model.setSpeechKey("") }
+        } else {
+            SecureField("ElevenLabs anahtarı", text: $key)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button("Anahtarı kaydet") {
+                model.setSpeechKey(key)
+                key = ""
+            }
+            .disabled(key.isEmpty)
+        }
+    }
+}
+#endif
+
 /// "Takıldım" yardımcısı (DENEME): isteğe bağlı bir soru yazılır, ipucu burada ve televizyonda görünür.
 /// İpucu kademelidir: önce küçük bir işaret, istenirse daha açığı, en son tam çözüm.
 private struct HelperSheet: View {

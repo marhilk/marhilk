@@ -365,6 +365,116 @@ final class AppModel: ObservableObject {
                                               options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 0.75])
     }
 
+    // MARK: Dublaj (DENEME)
+
+    /// Çevrilen replikleri Türkçe seslendir. Oyunun kendi sesi sürer; Türkçe ses üstüne okunur.
+    @Published var dubEnabled = false {
+        didSet {
+            defaults.set(dubEnabled, forKey: "dubEnabled")
+            if !dubEnabled {
+                dubber.stop()
+                server.sendSpeakStop()
+            }
+        }
+    }
+    /// "eleven" (ElevenLabs, doğal ses) ya da "system" (telefonun kendi sesi, ücretsiz).
+    @Published var dubEngine = Dubber.Engine.system.rawValue {
+        didSet {
+            defaults.set(dubEngine, forKey: "dubEngine")
+            dubber.engine = Dubber.Engine(rawValue: dubEngine) ?? .system
+        }
+    }
+    /// "tv" (televizyondan) ya da "phone" (telefondan).
+    @Published var dubOutput = Dubber.Output.tv.rawValue {
+        didSet {
+            defaults.set(dubOutput, forKey: "dubOutput")
+            dubber.output = Dubber.Output(rawValue: dubOutput) ?? .tv
+        }
+    }
+    @Published var dubVolume = 1.0 {
+        didSet {
+            defaults.set(dubVolume, forKey: "dubVolume")
+            dubber.volume = dubVolume
+        }
+    }
+    /// ElevenLabs anahtarı kayıtlı mı?
+    @Published private(set) var dubHasKey = false
+    /// Kullanıcının elle seçtiği cinsiyetler (konuşan adı küçük harfle → "male" / "female").
+    @Published private(set) var dubGenders: [String: String] = [:]
+    /// Bu oturumun ölçümü (ayarlar ekranında gösterilir).
+    @Published private(set) var dubSummary = ""
+    @Published private(set) var dubProblem: String?
+    let dubber = Dubber()
+    private var cast = VoiceCast()
+    private var castGame: String?
+
+    private func setUpDubbing() {
+        dubGenders = defaults.dictionary(forKey: "dubGenders") as? [String: String] ?? [:]
+        dubVolume = defaults.object(forKey: "dubVolume") as? Double ?? 1
+        dubOutput = defaults.string(forKey: "dubOutput") ?? Dubber.Output.tv.rawValue
+        let key = KeychainStore.loadSpeechKey()
+        dubber.eleven = key.map { ElevenLabsSpeech(apiKey: $0) }
+        dubHasKey = key != nil
+        // Anahtar varsa doğal ses, yoksa cihaz sesi.
+        dubEngine = defaults.string(forKey: "dubEngine") ?? (dubHasKey ? Dubber.Engine.eleven : .system).rawValue
+        dubEnabled = defaults.bool(forKey: "dubEnabled")
+        dubber.tvConnected = { [weak self] in (self?.tvCount ?? 0) > 0 }
+        dubber.deliver = { [weak self] data, type, volume in
+            guard let self else { return }
+            self.server.sendSpeak(path: self.pageServer.clips.add(data, type: type), volume: volume)
+        }
+        dubber.onChange = { [weak self] in
+            guard let self else { return }
+            self.dubProblem = self.dubber.problem
+            self.dubSummary = "Bu oturum: \(self.dubber.spoken) replik okundu"
+                + (self.dubber.skipped > 0 ? ", \(self.dubber.skipped) replik geride kalındığı için atlandı" : "")
+                + (self.dubber.characters > 0 ? " · ElevenLabs'e \(self.dubber.characters) harf gitti" : "")
+        }
+    }
+
+    func setSpeechKey(_ raw: String) {
+        let key = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        KeychainStore.saveSpeechKey(key.isEmpty ? nil : key)
+        dubber.eleven = key.isEmpty ? nil : ElevenLabsSpeech(apiKey: key)
+        dubHasKey = !key.isEmpty
+        if key.isEmpty, dubEngine == Dubber.Engine.eleven.rawValue { dubEngine = Dubber.Engine.system.rawValue }
+    }
+
+    /// Konuşanın cinsiyetini elle belirler (`unknown` = kendiliğinden); sesi buna göre yeniden seçilir.
+    func setDubGender(_ gender: DubGender, for speaker: String) {
+        let key = speaker.lowercased()
+        dubGenders[key] = gender == .unknown ? nil : gender.rawValue
+        defaults.set(dubGenders, forKey: "dubGenders")
+    }
+
+    func dubGender(of speaker: String?) -> DubGender {
+        VoiceCast.gender(of: speaker, pack: GamePacks.find(selectedGame),
+                         overrides: dubGenders.compactMapValues { DubGender(rawValue: $0) })
+    }
+
+    /// Konuşana verilen ses. Dağıtım oyun başına saklanır: karakter her oturumda aynı sesle konuşur.
+    func dubVoice(for speaker: String?) -> DubVoice {
+        if castGame != selectedGame {
+            let all = defaults.dictionary(forKey: "dubCast") as? [String: [String: String]] ?? [:]
+            cast = VoiceCast(assigned: all[selectedGame] ?? [:])
+            castGame = selectedGame
+        }
+        let before = cast.assigned
+        let voice = cast.voice(for: speaker, gender: dubGender(of: speaker))
+        if cast.assigned != before {
+            var all = defaults.dictionary(forKey: "dubCast") as? [String: [String: String]] ?? [:]
+            all[selectedGame] = cast.assigned
+            defaults.set(all, forKey: "dubCast")
+        }
+        return voice
+    }
+
+    /// Bir repliği dublaj sırasına koyar (ayarlardaki "dinle" düğmesi de bunu kullanır).
+    func dub(_ text: String, speaker: String?) {
+        guard let clean = DubText.clean(text) else { return }
+        dubber.enqueue(Dubber.Job(text: clean, speaker: speaker, voice: dubVoice(for: speaker), gender: dubGender(of: speaker)))
+    }
+
     // MARK: Televizyonda gizle / göster
 
     /// Televizyondaki altyazı gizli mi (kumandada YEŞİL tuş ya da buradaki düğme)? Televizyon bildirir.
@@ -630,6 +740,12 @@ final class AppModel: ObservableObject {
                 }
                 return
             }
+            if message["type"] as? String == "spoke" {
+                // Televizyon bir dublaj sesini çaldı (ya da çalamadı): ölçüm günlüğüne yaz.
+                let ok = message["ok"] as? Bool ?? false
+                self?.dubber.log.add("  TV: \(message["path"] as? String ?? "?") \(ok ? "çalındı" : "ÇALINAMADI") · sırada bekleme \(message["wait"] as? Int ?? -1) ms")
+                return
+            }
             if message["type"] as? String == "visibility" {
                 self?.tvMuted = message["hidden"] as? Bool ?? false
                 return
@@ -738,6 +854,23 @@ final class AppModel: ObservableObject {
                 }
                 return ("text/plain; charset=utf-8", Data("ayarlandı\n".utf8))
             }
+            if let line = text("/dublaj?t=") {
+                // "Ad: metin" biçiminde verilirse konuşan adıyla okunur.
+                Task { @MainActor in
+                    let parts = line.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                    if parts.count == 2, parts[0].count <= 24 { self?.dub(parts[1], speaker: parts[0]) } else { self?.dub(line, speaker: nil) }
+                }
+                return ("text/plain; charset=utf-8", Data("sıraya alındı\n".utf8))
+            }
+            if path == "/dublaj" {
+                let state = DispatchQueue.main.sync {
+                    MainActor.assumeIsolated { () -> String in
+                        guard let self else { return "" }
+                        return "açık: \(self.dubEnabled) · ses: \(self.dubEngine) · çıkış: \(self.dubOutput) · anahtar: \(self.dubHasKey ? "var" : "YOK") · tv: \(self.tvCount) · \(self.dubSummary)\(self.dubProblem.map { " · SORUN: \($0)" } ?? "")\n" + self.dubber.log.text
+                    }
+                }
+                return ("text/plain; charset=utf-8", Data(state.utf8))
+            }
             if let question = text("/takildim?s=") {
                 // "+" = aynı takılma için bir kademe daha açık ipucu; "-" = kutuyu kapat.
                 Task { @MainActor in
@@ -795,6 +928,7 @@ final class AppModel: ObservableObject {
         thermalOverride = ProcessInfo.ThermalState(rawValue: forced)
         #endif
         watchThermalState()
+        setUpDubbing()
     }
 
     /// Mac'te yapılmış PS5 eşleşmesi ve yapay zekâ anahtarı, uygulamanın Belgeler klasörüne
@@ -823,6 +957,13 @@ final class AppModel: ObservableObject {
             if !trimmed.isEmpty { KeychainStore.saveAIKey(trimmed) }
         }
         try? FileManager.default.removeItem(at: key)
+
+        let speechKey = documents.appendingPathComponent("elevenlabs-key")
+        if let text = try? String(contentsOf: speechKey, encoding: .utf8) {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { KeychainStore.saveSpeechKey(trimmed) }
+        }
+        try? FileManager.default.removeItem(at: speechKey)
     }
 
     // MARK: - Yaşam döngüsü
@@ -1562,6 +1703,8 @@ final class AppModel: ObservableObject {
             guard let translation = line.translation else { continue }
             recorded.insert(line.id)
             history.append(HistoryLine(id: line.id, date: Date(), speaker: line.speaker, translation: translation, source: line.source))
+            // Dublaj: yalnız konuşma replikleri (duyurular değil), her replik bir kez.
+            if dubEnabled, line.id < 1_000_000 { dub(translation, speaker: line.speaker) }
         }
         if history.count > 400 { history.removeFirst(history.count - 400) }
     }

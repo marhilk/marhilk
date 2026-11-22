@@ -6,6 +6,8 @@ public struct GamePack: Equatable, Sendable, Identifiable {
     public let name: String
     public let terms: [String]
     public var id: String { name }
+    /// Paketteki adlardan kadın karakter olanlar (dublajda ses seçimi için). Paketteki öteki kişi adları erkektir.
+    public var women: [String] { GamePacks.women[name] ?? [] }
 }
 
 public enum GamePacks {
@@ -13,6 +15,33 @@ public enum GamePacks {
     public static func find(_ name: String) -> GamePack? {
         all.first { $0.name.caseInsensitiveCompare(name.trimmingCharacters(in: .whitespaces)) == .orderedSame }
     }
+
+    /// Kadın karakterler (dublajda kadın sesiyle okunur). Cinsiyeti oyuncunun seçimine bağlı ya da belirsiz
+    /// olanlar ("Eivor", "Weasley") bilerek yoktur.
+    static let women: [String: [String]] = [
+        "Alan Wake 2": ["Saga", "Alice"],
+        "Assassin's Creed": ["Naoe", "Randvi", "Layla", "Roshan"],
+        "Baldur's Gate 3": ["Shadowheart", "Lae'zel", "Karlach", "Minthara", "Jaheira", "Orin", "Shar", "Selûne"],
+        "Call of Duty: Black Ops 6": ["Harrow", "Sev", "Park"],
+        "Call of Duty: Modern Warfare": ["Farah", "Laswell", "Valeria"],
+        "Cyberpunk 2077": ["Judy", "Panam", "Evelyn", "Rogue", "Misty", "Songbird"],
+        "Death Stranding": ["Fragile", "Mama", "Amelie", "Lockne"],
+        "Detroit: Become Human": ["Kara", "Alice", "North"],
+        "Elden Ring": ["Melina", "Ranni", "Rennala", "Malenia", "Marika", "Fia"],
+        "Final Fantasy VII": ["Tifa", "Aerith", "Yuffie", "Jenova"],
+        "Ghost of Tsushima": ["Yuna", "Masako", "Tomoe"],
+        "God of War": ["Freya", "Angrboda", "Faye"],
+        "Grand Theft Auto V": ["Amanda", "Tracey"],
+        "Hogwarts Legacy": ["Natsai", "Poppy"],
+        "Horizon": ["Aloy", "Zo", "Beta", "Tilda", "Regalla", "GAIA"],
+        "Marvel's Spider-Man": ["MJ", "Rio", "Yuri", "Hailey", "Aunt May"],
+        "Red Dead Redemption 2": ["Abigail", "Sadie", "Molly", "Susan", "Tilly", "Karen", "Mary-Beth"],
+        "Resident Evil 4": ["Ashley", "Ada", "Hunnigan"],
+        "Star Wars Jedi": ["Cere", "Merrin"],
+        "The Last of Us": ["Ellie", "Tess", "Marlene", "Riley", "Abby", "Dina", "Yara", "Mel"],
+        "The Witcher 3": ["Ciri", "Yennefer", "Triss", "Keira"],
+        "Uncharted 4": ["Elena", "Nadine"],
+    ]
 
     /// Adlar oyunda yazıldığı gibidir. Tek harfli ya da cümle başında sıradan kelime olan adlar
     /// ("V", "May") bilerek yoktur: korunursa sıradan cümleleri bozar.
